@@ -199,10 +199,14 @@ export class ClaudeApiProvider {
     systemPrompt: string;
     maxTokens: number;
   }): Promise<string> {
+    // The systemPrompt is the full prompt (init/observation/summary) built
+    // by build*Prompt in src/sdk/prompts.ts. It already contains role,
+    // schema, and example instructions inline. Send as a single user
+    // message — duplicating into `system` was observed to cause the
+    // model to emit raw-text <observation> blocks the parser rejects.
     const body = {
       model: args.model,
       max_tokens: args.maxTokens,
-      system: args.systemPrompt,
       messages: [{ role: 'user', content: args.systemPrompt }],
       stream: true,
     };

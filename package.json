@@ -1,6 +1,6 @@
 {
   "name": "light-mem",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Lightweight persistent memory for Claude Code and OpenCode. In-process embeddings, no external services.",
   "keywords": [
     "claude",

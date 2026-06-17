@@ -147,7 +147,31 @@ If a <parameters> or <outcome> block above contains an "<elided chars=... />" ma
 
 Return either one or more <observation>...</observation> blocks, or an empty response if this tool use should be skipped.
 Concrete debugging findings from logs, queue state, database rows, session routing, or code-path inspection count as durable discoveries and should be recorded.
-Never reply with prose such as "Skipping", "No substantive tool executions", or any explanation outside XML. Non-XML text is discarded.`;
+Never reply with prose such as "Skipping", "No substantive tool executions", or any explanation outside XML. Non-XML text is discarded.
+
+OUTPUT SCHEMA (mandatory — every <observation> block must use this structure or the parser will reject it):
+<observation>
+  <type>[ bugfix | feature | refactor | change | discovery | decision | security_alert | security_note ]</type>
+  <title>Short title capturing the core action or topic</title>
+  <subtitle>One sentence explanation (max 24 words)</subtitle>
+  <facts>
+    <fact>Concise self-contained statement (no pronouns, include filenames/values)</fact>
+    <fact>Another fact</fact>
+  </facts>
+  <narrative>Full context: what was done, how it works, why it matters</narrative>
+  <concepts>
+    <concept>how-it-works</concept>
+    <concept>gotcha</concept>
+  </concepts>
+  <files_read>
+    <file>path/to/file</file>
+  </files_read>
+  <files_modified>
+    <file>path/to/file</file>
+  </files_modified>
+</observation>
+
+All fields except <type>, <title>, and <narrative> are optional but recommended. <concepts> values must come from: how-it-works, why-it-exists, what-changed, problem-solution, gotcha, pattern, trade-off.`;
 }
 
 export function buildSummaryPrompt(session: SDKSession, mode: ModeConfig): string {
