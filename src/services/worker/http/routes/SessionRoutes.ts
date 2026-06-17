@@ -8,6 +8,7 @@ import { stripMemoryTagsFromPrompt, isInternalProtocolPayload } from '../../../.
 import { SessionManager } from '../../SessionManager.js';
 import { DatabaseManager } from '../../DatabaseManager.js';
 import { ClaudeProvider } from '../../ClaudeProvider.js';
+import { ClaudeApiProvider } from '../../ClaudeApiProvider.js';
 import type { WorkerService } from '../../../worker-service.js';
 import { BaseRouteHandler } from '../BaseRouteHandler.js';
 import { SessionEventBroadcaster } from '../../events/SessionEventBroadcaster.js';
@@ -27,7 +28,7 @@ export class SessionRoutes extends BaseRouteHandler {
   constructor(
     private sessionManager: SessionManager,
     private dbManager: DatabaseManager,
-    private sdkAgent: ClaudeProvider,
+    private sdkAgent: ClaudeProvider | ClaudeApiProvider,
     private eventBroadcaster: SessionEventBroadcaster,
     private workerService: WorkerService,
     private completionHandler: SessionCompletionHandler,
@@ -35,7 +36,7 @@ export class SessionRoutes extends BaseRouteHandler {
     super();
   }
 
-  private getActiveAgent(): ClaudeProvider {
+  private getActiveAgent(): ClaudeProvider | ClaudeApiProvider {
     return this.sdkAgent;
   }
 

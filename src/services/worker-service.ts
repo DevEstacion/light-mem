@@ -8,7 +8,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { getWorkerPort, getWorkerHost, fetchWithTimeout, resolveWorkerScriptPath } from '../shared/worker-utils.js';
 import { getCurrentWorkerPid, verifyRestartedWorker } from './restart-verify.js';
 import { runShutdownSequence, type WorkerShutdownReason } from './worker-shutdown.js';
-import { DATA_DIR, DB_PATH, ensureDir } from '../shared/paths.js';
+import { DATA_DIR, DB_PATH, ensureDir, paths } from '../shared/paths.js';
 import { HOOK_TIMEOUTS } from '../shared/hook-constants.js';
 import { SettingsDefaultsManager } from '../shared/SettingsDefaultsManager.js';
 import { getAuthMethodDescription } from '../shared/EnvManager.js';
@@ -64,6 +64,7 @@ import { DatabaseManager } from './worker/DatabaseManager.js';
 import { SessionManager } from './worker/SessionManager.js';
 import { SSEBroadcaster } from './worker/SSEBroadcaster.js';
 import { ClaudeProvider, classifyClaudeError } from './worker/ClaudeProvider.js';
+import { ClaudeApiProvider } from './worker/ClaudeApiProvider.js';
 import type { WorkerRef } from './worker/agents/types.js';
 import { ClassifiedProviderError, isClassified, type ProviderErrorClass } from './worker/provider-errors.js';
 import { PaginationHelper } from './worker/PaginationHelper.js';
@@ -123,7 +124,11 @@ export class WorkerService implements WorkerRef {
   private dbManager: DatabaseManager;
   private sessionManager: SessionManager;
   public sseBroadcaster: SSEBroadcaster;
-  private sdkAgent: ClaudeProvider;
+  // Structural type — both ClaudeProvider (SDK-backed, needs the `claude`
+  // binary) and ClaudeApiProvider (direct fetch() to the Messages API, no
+  // binary required) implement startSession with the same shape. The choice
+  // is made at construction based on LIGHT_MEM_CLAUDE_PROVIDER.
+  private sdkAgent: ClaudeProvider | ClaudeApiProvider;
   private paginationHelper: PaginationHelper;
   private settingsManager: SettingsManager;
   private sessionEventBroadcaster: SessionEventBroadcaster;
@@ -151,7 +156,16 @@ export class WorkerService implements WorkerRef {
     this.dbManager = new DatabaseManager();
     this.sessionManager = new SessionManager(this.dbManager);
     this.sseBroadcaster = new SSEBroadcaster();
-    this.sdkAgent = new ClaudeProvider(this.dbManager, this.sessionManager);
+
+    const settings = SettingsDefaultsManager.loadFromFile(paths.settings());
+    const providerMode = (settings.LIGHT_MEM_CLAUDE_PROVIDER || 'sdk').toLowerCase();
+    if (providerMode === 'api') {
+      this.sdkAgent = new ClaudeApiProvider(this.dbManager, this.sessionManager);
+      logger.info('WORKER', 'Using ClaudeApiProvider (direct Messages API, no `claude` binary required)');
+    } else {
+      this.sdkAgent = new ClaudeProvider(this.dbManager, this.sessionManager);
+      logger.info('WORKER', 'Using ClaudeProvider (Claude Agent SDK, requires `claude` binary)');
+    }
 
     this.paginationHelper = new PaginationHelper(this.dbManager);
     this.settingsManager = new SettingsManager(this.dbManager);

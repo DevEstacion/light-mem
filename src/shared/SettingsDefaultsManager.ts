@@ -12,6 +12,7 @@ export interface SettingsDefaults {
   LIGHT_MEM_API_TIMEOUT_MS: string;
   LIGHT_MEM_SKIP_TOOLS: string;
   LIGHT_MEM_CLAUDE_AUTH_METHOD: string;
+  LIGHT_MEM_CLAUDE_PROVIDER: string;
   LIGHT_MEM_DATA_DIR: string;
   LIGHT_MEM_LOG_LEVEL: string;
   CLAUDE_CODE_PATH: string;
@@ -59,6 +60,7 @@ export class SettingsDefaultsManager {
     LIGHT_MEM_API_TIMEOUT_MS: String(getTimeout(HOOK_TIMEOUTS.API_REQUEST)),
     LIGHT_MEM_SKIP_TOOLS: 'ListMcpResourcesTool,SlashCommand,Skill,TodoWrite,AskUserQuestion',
     LIGHT_MEM_CLAUDE_AUTH_METHOD: 'subscription',  // Default to logged-in Claude SDK auth (not API key)
+    LIGHT_MEM_CLAUDE_PROVIDER: 'sdk',  // 'sdk' (Claude Agent SDK + `claude` binary) or 'api' (direct Messages API, no binary)
     LIGHT_MEM_DATA_DIR: join(homedir(), '.light-mem'),
     LIGHT_MEM_LOG_LEVEL: 'INFO',
     CLAUDE_CODE_PATH: '', // Empty means auto-detect via 'which claude'
