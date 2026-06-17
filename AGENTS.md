@@ -21,6 +21,9 @@ npm run smoke:clean-room   # fresh-install dependency-closure smoke test
 Detailed command docs: `file:docs/commands.md:BUILD`, `file:docs/commands.md:TEST`,
 `file:docs/commands.md:LOCAL_DEV`.
 
+See `file:docs/migrating-from-claude-mem.md` for moving an existing
+claude-mem SQLite database to light-mem.
+
 ## Architecture
 
 Hooks (`plugin/hooks/hooks.json`) launch a Node worker (`worker-service.cjs`) that owns a
