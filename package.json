@@ -1,29 +1,31 @@
 {
   "name": "light-mem",
-  "version": "13.7.4",
-  "description": "Memory compression system for Claude Code - persist context across sessions",
+  "version": "0.1.0",
+  "description": "Lightweight persistent memory for Claude Code and OpenCode. In-process embeddings, no external services.",
   "keywords": [
     "claude",
     "claude-code",
+    "opencode",
     "claude-agent-sdk",
     "mcp",
     "plugin",
     "memory",
-    "compression",
-    "knowledge-graph",
+    "embeddings",
+    "model2vec",
+    "sqlite",
     "transcript",
     "typescript",
     "nodejs"
   ],
-  "author": "Ronald Estacion",
+  "author": "DevEstacion",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Ronald-Estacion_NordTech/light-mem.git"
+    "url": "git+https://github.com/DevEstacion/light-mem.git"
   },
-  "homepage": "https://github.com/Ronald-Estacion_NordTech/light-mem#readme",
+  "homepage": "https://github.com/DevEstacion/light-mem#readme",
   "bugs": {
-    "url": "https://github.com/Ronald-Estacion_NordTech/light-mem/issues"
+    "url": "https://github.com/DevEstacion/light-mem/issues"
   },
   "type": "module",
   "bin": {
@@ -98,16 +100,15 @@
     "check:postinstall-allowlist": "node scripts/check-postinstall-allowlist.js",
     "smoke:clean-room": "node scripts/smoke-clean-room.cjs",
     "prepublishOnly": "npm run build && node scripts/check-postinstall-allowlist.js",
-    "release": "np",
-    "release:patch": "np patch --no-cleanup",
-    "release:minor": "np minor --no-cleanup",
-    "release:major": "np major --no-cleanup"
+    "version:bump": "node scripts/bump-version.cjs patch",
+    "version:bump:minor": "node scripts/bump-version.cjs minor",
+    "version:bump:major": "node scripts/bump-version.cjs major",
+    "hooks:install": "bash scripts/install-hooks.sh"
   },
-  "np": {
-    "yarn": false,
-    "contents": ".",
-    "testScript": "test",
-    "2fa": false
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "tag": "latest"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.172",
@@ -146,7 +147,6 @@
     "@types/react-dom": "^19.2.3",
     "esbuild": "^0.28.0",
     "jimp": "^1.6.1",
-    "np": "^11.2.0",
     "parse5": "^8.0.1",
     "postcss": "^8.5.14",
     "remark-mdx": "^3.1.1",

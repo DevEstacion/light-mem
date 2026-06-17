@@ -1,0 +1,121 @@
+name: publish
+
+# Publishes light-mem to npmjs when package.json version is greater than
+# the currently-published version on the registry.
+#
+# Triggered by:
+#   * push to main              — every merge that bumps package.json
+#   * workflow_dispatch         — manual retry / force republish
+#
+# Flow:
+#   1. Resolve the version in package.json (source of truth).
+#   2. Resolve the latest version on the registry (`npm view light-mem version`).
+#   3. Compare; bail out cleanly if not greater. This means unchanged main
+#      pushes don't republish, and the very first publish works (npm returns
+#      a 404 / empty version, which we treat as "no prior version").
+#   4. npm ci + npm run build (uses the prepublishOnly path: build +
+#      check-postinstall-allowlist).
+#   5. Create annotated git tag v<version> pointing at HEAD, push it back.
+#   6. npm publish --provenance=false (we keep secrets minimal; flip to true
+#      later if you enable npm provenance).
+#
+# Auth:
+#   NPM_TOKEN secret (Automation token, not a publish token). Walked up in
+#   docs/publishing.md.
+#
+# Why not `npm version` in CI: the pre-commit hook already bumps package.json
+# locally, so by the time we see a main push the version has moved. CI is
+# read-only against package.json here except for the git tag it appends.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # to create git tags
+
+concurrency:
+  # One publish at a time. Cancelling a queued run is fine; we just don't want
+  # two parallel publishes racing against the registry.
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need full history for `git show HEAD:package.json`
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve package.json version
+        id: pkg
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "package.json version: $VERSION"
+
+      - name: Resolve published version on npm
+        id: npm
+        # Treat 404 / network error as "no prior version" — first publish.
+        run: |
+          set +e
+          PUBLISHED=$(npm view "light-mem@${{ steps.pkg.outputs.version }}" version 2>/dev/null)
+          EXIT=$?
+          set -e
+          if [ $EXIT -ne 0 ] || [ -z "$PUBLISHED" ]; then
+            echo "No published version equal to ${{ steps.pkg.outputs.version }} (first publish or version not yet on registry)."
+            echo "published=" >> "$GITHUB_OUTPUT"
+          else
+            echo "Latest matching published version on registry: $PUBLISHED"
+            echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip if version already published
+        if: steps.npm.outputs.published != ''
+        run: |
+          echo "Version ${{ steps.pkg.outputs.version }} is already on the registry. Skipping publish."
+          exit 0
+
+      - name: Build (prepublishOnly path)
+        run: npm run build
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
+      - name: Create git tag
+        # Only annotate + push the tag after a successful publish. If publish
+        # fails above, no tag is created — keeps the repo state consistent
+        # with the registry.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.pkg.outputs.version }}" -m "v${{ steps.pkg.outputs.version }}"
+          git push origin "v${{ steps.pkg.outputs.version }}"
+
+      - name: Create GitHub release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.pkg.outputs.version }}
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(steps.pkg.outputs.version, '-') }}

@@ -1,24 +1,26 @@
 {
   "name": "light-mem",
-  "version": "13.7.4",
-  "description": "Memory compression system for Claude Code - persist context across sessions",
+  "version": "0.1.0",
+  "description": "Lightweight persistent memory for Claude Code and OpenCode. In-process embeddings, no external services.",
   "author": {
-    "name": "Ronald Estacion"
+    "name": "DevEstacion"
   },
-  "repository": "https://github.com/Ronald-Estacion_NordTech/light-mem",
+  "repository": "git+https://github.com/DevEstacion/light-mem",
   "license": "Apache-2.0",
   "keywords": [
     "claude",
     "claude-code",
+    "opencode",
     "claude-agent-sdk",
     "mcp",
     "plugin",
     "memory",
-    "compression",
-    "knowledge-graph",
+    "embeddings",
+    "model2vec",
+    "sqlite",
     "transcript",
     "typescript",
     "nodejs"
   ],
-  "homepage": "https://github.com/Ronald-Estacion_NordTech/light-mem#readme"
+  "homepage": "https://github.com/DevEstacion/light-mem#readme"
 }

@@ -1,17 +1,17 @@
 {
   "name": "light-mem",
   "owner": {
-    "name": "Ronald Estacion"
+    "name": "DevEstacion"
   },
   "metadata": {
-    "description": "Plugins by Ronald Estacion (light-mem)"
+    "description": "Light-mem — lightweight persistent memory for Claude Code and OpenCode"
   },
   "plugins": [
     {
       "name": "light-mem",
-      "version": "13.7.4",
+      "version": "0.1.0",
       "source": "./plugin",
-      "description": "Persistent memory system for Claude Code - context compression across sessions"
+      "description": "Lightweight persistent memory for Claude Code and OpenCode. In-process embeddings, no external services."
     }
   ]
 }
