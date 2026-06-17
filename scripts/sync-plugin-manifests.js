@@ -10,6 +10,8 @@ const rootDir = path.resolve(__dirname, '..');
 const packageJsonPath = path.join(rootDir, 'package.json');
 const claudePluginPath = path.join(rootDir, '.claude-plugin', 'plugin.json');
 const bundledClaudePluginPath = path.join(rootDir, 'plugin', '.claude-plugin', 'plugin.json');
+const marketplacePath = path.join(rootDir, '.claude-plugin', 'marketplace.json');
+const bundledPackageJsonPath = path.join(rootDir, 'plugin', 'package.json');
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -49,8 +51,29 @@ function normalizeRepositoryUrl(repository) {
   return '';
 }
 
+// Sync each plugin entry in marketplace.json to package.json's version +
+// description. The marketplace catalog version is what Claude Code reports as
+// the installed plugin version; if it drifts from the worker's own version
+// (read from plugin/package.json) the worker recycles itself on every hook.
+function syncMarketplace(marketplace, pkg) {
+  return {
+    ...marketplace,
+    plugins: (marketplace.plugins || []).map((plugin) => ({
+      ...plugin,
+      version: pkg.version,
+      description: pkg.description,
+    })),
+  };
+}
+
 function main() {
-  for (const filePath of [packageJsonPath, claudePluginPath, bundledClaudePluginPath]) {
+  for (const filePath of [
+    packageJsonPath,
+    claudePluginPath,
+    bundledClaudePluginPath,
+    marketplacePath,
+    bundledPackageJsonPath,
+  ]) {
     if (!fs.existsSync(filePath)) {
       console.error(`Missing required file: ${filePath}`);
       process.exit(1);
@@ -60,11 +83,17 @@ function main() {
   const pkg = readJson(packageJsonPath);
   const claudePlugin = readJson(claudePluginPath);
   const bundledClaudePlugin = readJson(bundledClaudePluginPath);
+  const marketplace = readJson(marketplacePath);
+  const bundledPackageJson = readJson(bundledPackageJsonPath);
 
   writeJson(claudePluginPath, syncClaudePlugin(claudePlugin, pkg));
   writeJson(bundledClaudePluginPath, syncClaudePlugin(bundledClaudePlugin, pkg));
+  writeJson(marketplacePath, syncMarketplace(marketplace, pkg));
+  // plugin/package.json keeps its own name/description (runtime dep manifest);
+  // only the version is derived from the root package.json.
+  writeJson(bundledPackageJsonPath, { ...bundledPackageJson, version: pkg.version });
 
-  console.log('✓ Synced plugin manifests from package.json');
+  console.log('✓ Synced plugin manifests + marketplace from package.json');
 }
 
 main();

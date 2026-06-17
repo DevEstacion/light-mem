@@ -1,26 +1,25 @@
 #!/usr/bin/env node
 /**
- * Bump the version in package.json + .claude-plugin/marketplace.json + (optional) plugin/.claude-plugin/plugin.json.
- *
  * Two modes:
- *   1. CLI mode (manual): `node scripts/bump-version.cjs [patch|minor|major]`
- *      Bumps the version in place. Run after editing source if you want a version
- *      bump without a commit (e.g. before pushing).
+ *   1. CLI mode (explicit bump): `node scripts/bump-version.cjs [patch|minor|major]`
+ *      Bumps package.json and propagates the new version into every derived
+ *      manifest via sync-plugin-manifests.js. Wired as `npm run version:bump`.
+ *      Run `npm run build` afterward so the build-time-injected version in the
+ *      bundled .cjs files (worker-service.cjs / Server) matches too.
  *
- *   2. Pre-commit hook mode (default when stdin is not a TTY AND no arg is given):
- *      Called from .git/hooks/pre-commit. Bumps only when the staged diff for
- *      package.json does NOT already contain a version bump from this same hook
- *      invocation. Re-stages the bumped files so the bump rides into the user's
- *      commit instead of spawning a second commit.
- *
- * Idempotence: the hook reads the staged version. If the staged version already
- * differs from the prior HEAD version (i.e. someone else bumped it in this
- * branch and the hook is being re-run), it skips.
+ *   2. Pre-commit hook mode (default when no arg is given):
+ *      Called from .git/hooks/pre-commit. Does NOT bump — it VERIFIES that the
+ *      version is consistent across every source and blocks the commit on drift.
+ *      The build (npm run build) is the single propagation point; the hook is
+ *      the guard that the build was actually run. This avoids the trap where a
+ *      JSON-only bump leaves the build-time version baked into the .cjs stale,
+ *      which makes the worker recycle itself on every hook (see
+ *      tests/infrastructure/version-consistency.test.ts and the worker
+ *      recycle check in src/shared/worker-utils.ts).
  *
  * Exit codes:
- *   0  bump applied, OR bump skipped (no-op)
- *   1  invalid usage / malformed package.json
- *   2  pre-commit hook detected that staging area is not a git repo
+ *   0  CLI bump applied, OR hook verification passed (versions consistent)
+ *   1  invalid usage / malformed package.json / version drift (commit blocked)
  */
 
 const fs = require('fs');
@@ -29,7 +28,7 @@ const { execSync } = require('child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const PACKAGE_JSON = path.join(REPO_ROOT, 'package.json');
-const MARKETPLACE_JSON = path.join(REPO_ROOT, '.claude-plugin', 'marketplace.json');
+const SYNC_MANIFESTS = path.join(__dirname, 'sync-plugin-manifests.js');
 
 const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)(?:[-+][\w.-]*)?$/;
 
@@ -65,38 +64,29 @@ function writePackageJson(json, raw) {
   fs.writeFileSync(PACKAGE_JSON, JSON.stringify(json, null, 2) + trailing);
 }
 
-function syncMarketplaceVersion(newVersion, description) {
-  if (!fs.existsSync(MARKETPLACE_JSON)) return;
-  const raw = fs.readFileSync(MARKETPLACE_JSON, 'utf8');
-  const json = JSON.parse(raw);
-  let dirty = false;
-  for (const plugin of json.plugins || []) {
-    if (plugin.version !== newVersion) {
-      plugin.version = newVersion;
-      dirty = true;
-    }
-    if (description && plugin.description !== description) {
-      plugin.description = description;
-      dirty = true;
-    }
-  }
-  if (dirty) {
-    fs.writeFileSync(MARKETPLACE_JSON, JSON.stringify(json, null, 2) + '\n');
-  }
+// Propagate the just-written package.json version into every derived manifest
+// (.claude-plugin/plugin.json, plugin/.claude-plugin/plugin.json,
+// .claude-plugin/marketplace.json, plugin/package.json). Delegating to the
+// single sync script keeps one source of propagation logic — the hook and
+// `npm run build` can never write a different subset of files and drift.
+function syncDerivedManifests() {
+  execSync(`node ${JSON.stringify(SYNC_MANIFESTS)}`, {
+    cwd: REPO_ROOT,
+    stdio: 'inherit',
+  });
 }
 
-function getPriorVersionFromHead() {
-  try {
-    const out = execSync('git show HEAD:package.json', {
-      cwd: REPO_ROOT,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).toString();
-    return JSON.parse(out).version;
-  } catch {
-    // No prior commit, or this is the first commit.
-    return null;
-  }
-}
+// Files derived from package.json's version. Kept in one place so cliBump and
+// hookVerify check the identical set.
+//
+// FLAT_VERSION_FILES carry the version as a top-level "version" field.
+// marketplace.json is separate: its versions live under plugins[].version.
+const FLAT_VERSION_FILES = [
+  '.claude-plugin/plugin.json',
+  'plugin/.claude-plugin/plugin.json',
+  'plugin/package.json',
+];
+const MARKETPLACE_FILE = '.claude-plugin/marketplace.json';
 
 function isGitRepo() {
   try {
@@ -108,6 +98,35 @@ function isGitRepo() {
   } catch {
     return false;
   }
+}
+
+// Read the top-level "version" field out of a JSON manifest, null if absent.
+function jsonVersion(relPath) {
+  const abs = path.join(REPO_ROOT, relPath);
+  if (!fs.existsSync(abs)) return null;
+  return JSON.parse(fs.readFileSync(abs, 'utf8')).version ?? null;
+}
+
+// Return any plugins[].version in marketplace.json that differs from expected
+// (marketplace versions are nested, not a top-level field).
+function marketplaceDrift(expected) {
+  const abs = path.join(REPO_ROOT, MARKETPLACE_FILE);
+  if (!fs.existsSync(abs)) return [`${MARKETPLACE_FILE}: (missing)`];
+  const plugins = JSON.parse(fs.readFileSync(abs, 'utf8')).plugins || [];
+  return plugins
+    .filter((p) => p.version !== expected)
+    .map((p) => `${MARKETPLACE_FILE} [${p.name}]: ${p.version ?? '(missing)'}`);
+}
+
+// The bundled worker .cjs files have the version injected at build time
+// (__DEFAULT_PACKAGE_VERSION__ → "x.y.z"). The worker serves this on
+// GET /api/health, and the recycle check compares it to the marketplace
+// version — so a stale .cjs version is exactly what wedges the worker. Scan
+// for the expected literal so the hook fails when the build wasn't re-run.
+function builtCjsHasVersion(relPath, version) {
+  const abs = path.join(REPO_ROOT, relPath);
+  if (!fs.existsSync(abs)) return null; // not built — not a drift signal
+  return fs.readFileSync(abs, 'utf8').includes(`"${version}"`);
 }
 
 function cliBump(type) {
@@ -124,47 +143,55 @@ function cliBump(type) {
   const next = bump(match.slice(1, 4).map(Number), type);
   json.version = next;
   writePackageJson(json, raw);
-  syncMarketplaceVersion(next, json.description);
+  syncDerivedManifests();
   console.log(`Bumped version: ${match[0]} -> ${next}`);
 }
 
-function hookBump() {
+// Built .cjs files whose version is injected at build time. Checked only if
+// present (a fresh checkout before `npm run build` has none).
+const BUILT_CJS_FILES = [
+  'plugin/scripts/worker-service.cjs',
+];
+
+function hookVerify() {
   if (!isGitRepo()) {
-    // Not a git checkout (e.g. extracted tarball in CI). Skip silently.
+    // Not a git checkout (e.g. extracted tarball in CI). Nothing to guard.
     process.exit(0);
   }
 
-  const { raw, json } = readPackageJson();
-  const match = SEMVER_RE.exec(json.version);
-  if (!match) {
-    console.error(`bump-version: cannot parse current version ${json.version}`);
+  const { json } = readPackageJson();
+  const expected = json.version;
+  if (!SEMVER_RE.exec(expected)) {
+    console.error(`bump-version: cannot parse package.json version ${expected}`);
     process.exit(1);
   }
 
-  const prior = getPriorVersionFromHead();
-  // If the working-tree version differs from HEAD, the bump is already in flight
-  // (user ran `npm run version:bump` manually, or this hook ran on a prior
-  // commit and is being re-invoked). Don't double-bump.
-  if (prior !== null && prior !== json.version) {
-    process.exit(0);
+  const drift = [];
+
+  for (const rel of FLAT_VERSION_FILES) {
+    const v = jsonVersion(rel);
+    if (v !== expected) drift.push(`  ${rel}: ${v ?? '(missing)'} (expected ${expected})`);
   }
 
-  const next = bump(match.slice(1, 4).map(Number), 'patch');
-  json.version = next;
-  writePackageJson(json, raw);
-  syncMarketplaceVersion(next, json.description);
+  for (const line of marketplaceDrift(expected)) {
+    drift.push(`  ${line} (expected ${expected})`);
+  }
 
-  execSync('git add package.json .claude-plugin/marketplace.json', {
-    cwd: REPO_ROOT,
-    stdio: 'inherit',
-  });
+  for (const rel of BUILT_CJS_FILES) {
+    const ok = builtCjsHasVersion(rel, expected);
+    if (ok === false) drift.push(`  ${rel}: version ${expected} not found in bundle (stale build)`);
+  }
 
-  console.log(`pre-commit: bumped version ${match[0]} -> ${next}`);
+  if (drift.length > 0) {
+    console.error('bump-version: version drift — commit blocked.\n' + drift.join('\n'));
+    console.error('\nFix: run `npm run build` to re-propagate the version, then re-stage.');
+    process.exit(1);
+  }
 }
 
 const arg = process.argv[2];
 if (arg) {
   cliBump(arg);
 } else {
-  hookBump();
+  hookVerify();
 }

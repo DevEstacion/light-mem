@@ -7,8 +7,11 @@
 #
 # Hooks installed:
 #   .git/hooks/pre-commit
-#     - Runs scripts/bump-version.cjs (auto-bumps package.json + marketplace
-#       manifest, re-stages the bump into the same commit, no second commit).
+#     - Runs scripts/bump-version.cjs in verify mode: blocks the commit if the
+#       version has drifted across package.json, the plugin manifests, the
+#       marketplace catalog, or the built worker .cjs. The build
+#       (npm run build) is the single propagation point; this hook guards that
+#       it was run.
 #     - Aborts the commit if package.json is unparseable.
 #
 # What the hook does NOT do:
@@ -46,8 +49,8 @@ fi
 cat > "$PRE_COMMIT" <<'HOOK'
 #!/usr/bin/env bash
 # light-mem-bump-version
-# Auto-bumps package.json + .claude-plugin/marketplace.json on every commit.
-# Idempotent: skipped if package.json already differs from HEAD.
+# Verifies the version is consistent across package.json, the plugin manifests,
+# the marketplace catalog, and the built worker .cjs. Blocks the commit on drift.
 set -euo pipefail
 node "$(git rev-parse --show-toplevel)/scripts/bump-version.cjs"
 HOOK
