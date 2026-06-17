@@ -95,16 +95,22 @@ jobs:
         run: npm run build
 
       - name: Publish to npm
+        # npm >=10 reads credentials from a project-local .npmrc, not from the
+        # NODE_AUTH_TOKEN env var. Write a temp .npmrc for this step only.
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          {
+            echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}'
+            echo 'registry=https://registry.npmjs.org/'
+          } > .npmrc
+          npm publish --access public
+          rm -f .npmrc
 
       - name: Create git tag
         # Only annotate + push the tag after a successful publish. If publish
         # fails above, no tag is created — keeps the repo state consistent
         # with the registry.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
