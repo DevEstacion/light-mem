@@ -31,7 +31,8 @@ export async function processAgentResponse(
   originalTimestamp: number | null,
   agentName: string,
   projectRoot?: string,
-  modelId?: string
+  modelId?: string,
+  truncated = false
 ): Promise<void> {
   const processingStartedAt = Date.now();
   session.lastGeneratorActivity = Date.now();
@@ -84,9 +85,40 @@ export async function processAgentResponse(
     return;
   }
 
-  // Valid parse — clear the invalid-output counter so transient misses don't
-  // accumulate toward a respawn across a healthy session.
-  session.consecutiveInvalidOutputs = 0;
+  // Valid parse.
+  //
+  // Clean (non-truncated) response: clear the invalid-output counter so
+  // transient misses don't accumulate toward a respawn across a healthy
+  // session.
+  //
+  // Truncated-but-parseable response (API path max_tokens): the batch is
+  // incomplete by definition (trailing observations were cut off), but what
+  // parsed is still worth keeping. Salvage it — AND count the truncation
+  // toward the respawn threshold so chronic truncation still escalates. Merely
+  // not-resetting the counter (its prior behavior) left it frozen: a session
+  // that started healthy and only ever truncated would sit at 0 forever and
+  // never respawn. Increment + threshold-check fixes that. At the threshold we
+  // respawn without persisting (the respawn preserves the pending messages for
+  // a fresh attempt; persisting here would double-store after re-queue).
+  if (truncated) {
+    session.consecutiveInvalidOutputs = (session.consecutiveInvalidOutputs ?? 0) + 1;
+    if (session.consecutiveInvalidOutputs >= INVALID_OUTPUT_RESPAWN_THRESHOLD) {
+      logger.error('SESSION', `${agentName} chronic truncation (max_tokens) — respawning session, pending messages preserved`, {
+        sessionId: session.sessionDbId,
+        consecutiveInvalidOutputs: session.consecutiveInvalidOutputs,
+        threshold: INVALID_OUTPUT_RESPAWN_THRESHOLD,
+      });
+      await sessionManager.respawnPoisonedSession(session.sessionDbId);
+      return;
+    }
+    logger.warn('PARSER', `${agentName} response truncated (max_tokens) but parsed — salvaging partial batch`, {
+      sessionId: session.sessionDbId,
+      consecutiveInvalidOutputs: session.consecutiveInvalidOutputs,
+      threshold: INVALID_OUTPUT_RESPAWN_THRESHOLD,
+    });
+  } else {
+    session.consecutiveInvalidOutputs = 0;
+  }
 
   if (!session.memorySessionId) {
     logger.warn('SDK', 'memorySessionId not yet captured; deferring storage until next round', {

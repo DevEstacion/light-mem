@@ -10,6 +10,8 @@ import type { ActiveSession } from '../worker-types.js';
 import { ModeManager } from '../domain/ModeManager.js';
 import { processAgentResponse, type WorkerRef } from './agents/index.js';
 import { resolveTierAlias } from './model-aliases.js';
+import { classifyClaudeError } from './ClaudeProvider.js';
+import { AsyncSemaphore } from './AsyncSemaphore.js';
 
 /**
  * Drop-in replacement for ClaudeProvider that calls the Anthropic Messages
@@ -46,6 +48,55 @@ import { resolveTierAlias } from './model-aliases.js';
  * mode). If the API doesn't return text/event-stream, falls back to a
  * non-streaming POST and processes the full response once.
  */
+
+// Module-scoped semaphore: all API sessions in this worker share one cap.
+// Capacity is read once at first startSession call.
+let _semaphore: AsyncSemaphore | null = null;
+
+function getSemaphore(capacity: number): AsyncSemaphore {
+  if (!_semaphore) {
+    _semaphore = new AsyncSemaphore(capacity);
+  }
+  return _semaphore;
+}
+
+// Exported for test-harness access only — not part of the public API.
+export { getSemaphore as __getSemaphoreForTesting };
+
+/** Retry loop constants. Tests can override via CallArgs. */
+const DEFAULT_BASE_MS = 1000;
+const DEFAULT_CAP_MS = 30_000;
+const MAX_ATTEMPTS = 3;
+
+type CallArgs = {
+  baseUrl: string;
+  authToken: string;
+  model: string;
+  systemPrompt: string;
+  maxTokens: number;
+  signal: AbortSignal;
+  /** Backoff base milliseconds — injectable to speed up tests. */
+  BASE_MS?: number;
+  /** Backoff ceiling milliseconds — injectable to speed up tests. */
+  CAP_MS?: number;
+};
+
+type ApiResult = { text: string; stopReason: string | null };
+
+/**
+ * Abort-aware sleep. Rejects if signal fires during the wait.
+ */
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) { reject(new Error('Aborted')); return; }
+    // Remove the abort listener when the timer fires normally, so it doesn't
+    // leak onto the long-lived session signal across many backoff sleeps.
+    const onAbort = () => { clearTimeout(timer); reject(new Error('Aborted')); };
+    const timer = setTimeout(() => { signal.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 export class ClaudeApiProvider {
   private dbManager: DatabaseManager;
   private sessionManager: SessionManager;
@@ -97,19 +148,32 @@ export class ClaudeApiProvider {
     session.lastPromptSentAt = Date.now();
     session.lastGeneratorSource = 'init';
 
+    const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
+    const maxConcurrent = parseInt(settings.LIGHT_MEM_MAX_CONCURRENT_AGENTS, 10) || 2;
+    const sem = getSemaphore(maxConcurrent);
+
     for await (const message of this.messageGenerator(session)) {
       if (session.abortController.signal.aborted) {
         logger.warn('API', 'Session aborted before message', { sessionDbId: session.sessionDbId });
         break;
       }
 
-      const text = await this.callMessagesApi({
-        baseUrl,
-        authToken,
-        model: modelId,
-        systemPrompt: message.content,
-        maxTokens: 4096,
-      });
+      await sem.acquire(session.abortController.signal);
+      let result: ApiResult;
+      try {
+        result = await this.callMessagesApi({
+          baseUrl,
+          authToken,
+          model: modelId,
+          systemPrompt: message.content,
+          maxTokens: 4096,
+          signal: session.abortController.signal,
+        });
+      } finally {
+        sem.release();
+      }
+
+      const { text, stopReason } = result;
 
       if (!text) {
         continue;
@@ -119,25 +183,18 @@ export class ClaudeApiProvider {
       const tokensBeforeResponse = session.cumulativeInputTokens + session.cumulativeOutputTokens;
       const discoveryTokens = Math.max(0, (session.cumulativeInputTokens + session.cumulativeOutputTokens) - tokensBeforeResponse);
 
-      if (text.includes('prompt is too long') || text.includes('context window')) {
-        logger.error('API', 'Context overflow detected — forcing fresh start', {
-          sessionDbId: session.sessionDbId
+      if (stopReason === 'max_tokens') {
+        logger.warn('API', `Response truncated at max_tokens — prompt #${session.lastPromptNumber}, ${responseSize} chars received. Partial XML will be salvaged if parseable.`, {
+          sessionId: session.sessionDbId,
+          promptNumber: session.lastPromptNumber,
+          responseSize,
         });
-        session.abortReason = 'overflow';
-        try { session.abortController.abort(); } catch { /* best-effort */ }
-        break;
-      }
-
-      if (text.includes('Invalid API key')) {
-        throw new Error('Invalid API key: check ANTHROPIC_AUTH_TOKEN in ~/.light-mem/.env');
-      }
-
-      if (responseSize > 100) {
-        const truncated = text.substring(0, 100) + '...';
+      } else if (responseSize > 100) {
+        const preview = text.substring(0, 100) + '...';
         logger.dataOut('API', `Response received (${responseSize} chars)`, {
           sessionId: session.sessionDbId,
           promptNumber: session.lastPromptNumber
-        }, truncated);
+        }, preview);
       }
 
       await processAgentResponse(
@@ -150,7 +207,8 @@ export class ClaudeApiProvider {
         session.earliestPendingTimestamp,
         'API',
         undefined,
-        modelId
+        modelId,
+        stopReason === 'max_tokens'  // truncated flag
       );
     }
 
@@ -207,18 +265,20 @@ export class ClaudeApiProvider {
     }
   }
 
-  private async callMessagesApi(args: {
-    baseUrl: string;
-    authToken: string;
-    model: string;
-    systemPrompt: string;
-    maxTokens: number;
-  }): Promise<string> {
-    // The systemPrompt is the full prompt (init/observation/summary) built
-    // by build*Prompt in src/sdk/prompts.ts. It already contains role,
-    // schema, and example instructions inline. Send as a single user
-    // message — duplicating into `system` was observed to cause the
-    // model to emit raw-text <observation> blocks the parser rejects.
+  /**
+   * Call the Messages API with a bounded retry loop (up to MAX_ATTEMPTS).
+   * Rate-limit (429) and transient (529/5xx/network) errors are retried with
+   * backoff; unrecoverable / auth errors throw immediately.
+   *
+   * `fetchImpl` defaults to the global `fetch` and is injectable for tests.
+   */
+  async callMessagesApi(
+    args: CallArgs,
+    fetchImpl: typeof fetch = fetch
+  ): Promise<ApiResult> {
+    const BASE_MS = args.BASE_MS ?? DEFAULT_BASE_MS;
+    const CAP_MS = args.CAP_MS ?? DEFAULT_CAP_MS;
+
     const body = {
       model: args.model,
       max_tokens: args.maxTokens,
@@ -226,30 +286,104 @@ export class ClaudeApiProvider {
       stream: true,
     };
 
-    const res = await fetch(`${args.baseUrl}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': args.authToken,
-        'anthropic-version': '2023-06-01',
-        'accept': 'text/event-stream',
-      },
-      body: JSON.stringify(body),
-    });
+    const headers = {
+      'content-type': 'application/json',
+      'x-api-key': args.authToken,
+      'anthropic-version': '2023-06-01',
+      'accept': 'text/event-stream',
+    };
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      throw new Error(`Anthropic API ${res.status}: ${errText.slice(0, 500)}`);
+    let lastErr: unknown;
+
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      let res: Response;
+      try {
+        res = await fetchImpl(`${args.baseUrl}/v1/messages`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          signal: args.signal,
+        });
+      } catch (fetchErr) {
+        // Network-level fetch rejection (DNS failure, connection refused, etc.)
+        lastErr = fetchErr;
+        const classified = classifyClaudeError(fetchErr);
+        if (classified.kind === 'unrecoverable' || classified.kind === 'auth_invalid' || classified.kind === 'quota_exhausted') {
+          throw classified;
+        }
+        // transient (network errors carry no .status; rate_limit cannot arise
+        // here — classifyClaudeError needs status 429). Back off and retry,
+        // unless this was the last attempt (no point sleeping before the throw).
+        if (attempt < MAX_ATTEMPTS - 1) {
+          const backoffMs = Math.min(Math.pow(2, attempt) * BASE_MS, CAP_MS);
+          logger.warn('API', `fetch rejected (attempt ${attempt + 1}/${MAX_ATTEMPTS}), backing off ${backoffMs}ms`, {
+            error: fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
+          });
+          await abortableSleep(backoffMs, args.signal);
+        }
+        continue;
+      }
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        let errType: string | undefined;
+        try {
+          const parsed = JSON.parse(errText);
+          errType = parsed?.error?.type;
+        } catch { /* ignore */ }
+
+        // Build an error object the classifier can read via .status / .error.type
+        const rawErr = Object.assign(new Error(`Anthropic API ${res.status}: ${errText.slice(0, 500)}`), {
+          status: res.status,
+          error: errType ? { type: errType } : undefined,
+        });
+        lastErr = rawErr;
+        const classified = classifyClaudeError(rawErr);
+
+        if (classified.kind === 'unrecoverable' || classified.kind === 'auth_invalid' || classified.kind === 'quota_exhausted') {
+          throw classified;
+        }
+
+        // Last attempt — don't sleep before falling through to the throw.
+        if (attempt >= MAX_ATTEMPTS - 1) {
+          continue;
+        }
+
+        // rate_limit: honor Retry-After header if present, else exponential backoff
+        let sleepMs: number;
+        if (classified.kind === 'rate_limit') {
+          const retryAfterHeader = res.headers.get('retry-after');
+          if (retryAfterHeader !== null) {
+            const secs = parseFloat(retryAfterHeader);
+            sleepMs = isNaN(secs) ? Math.min(Math.pow(2, attempt) * BASE_MS, CAP_MS) : secs * 1000;
+          } else {
+            sleepMs = Math.min(Math.pow(2, attempt) * BASE_MS, CAP_MS);
+          }
+        } else {
+          // transient
+          sleepMs = Math.min(Math.pow(2, attempt) * BASE_MS, CAP_MS);
+        }
+
+        logger.warn('API', `HTTP ${res.status} (${classified.kind}) on attempt ${attempt + 1}/${MAX_ATTEMPTS}, retrying in ${sleepMs}ms`, {
+          status: res.status,
+          errType,
+        });
+        await abortableSleep(sleepMs, args.signal);
+        continue;
+      }
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('text/event-stream')) {
+        return this.parseNonStreamingResponse(res);
+      }
+      return this.parseStreamingResponse(res);
     }
 
-    const contentType = res.headers.get('content-type') || '';
-    if (!contentType.includes('text/event-stream')) {
-      return this.parseNonStreamingResponse(res);
-    }
-    return this.parseStreamingResponse(res);
+    // All attempts exhausted
+    throw classifyClaudeError(lastErr);
   }
 
-  private async parseStreamingResponse(res: Response): Promise<string> {
+  private async parseStreamingResponse(res: Response): Promise<ApiResult> {
     const reader = res.body?.getReader();
     if (!reader) {
       throw new Error('Streaming response had no body reader');
@@ -258,6 +392,7 @@ export class ClaudeApiProvider {
     const decoder = new TextDecoder();
     let buffer = '';
     const blocks: Array<{ index: number; text: string }> = [];
+    let stopReason: string | null = null;
 
     try {
       while (true) {
@@ -278,7 +413,13 @@ export class ClaudeApiProvider {
           const data = dataLines.join('\n');
           if (data === '[DONE]') continue;
 
-          let evt: { type?: string; index?: number; delta?: { type?: string; text?: string }; message?: { usage?: { input_tokens?: number; output_tokens?: number } } };
+          let evt: {
+            type?: string;
+            index?: number;
+            delta?: { type?: string; text?: string; stop_reason?: string };
+            usage?: { output_tokens?: number };
+            message?: { usage?: { input_tokens?: number; output_tokens?: number } };
+          };
           try { evt = JSON.parse(data); } catch { continue; }
 
           if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta' && typeof evt.delta.text === 'string') {
@@ -289,6 +430,14 @@ export class ClaudeApiProvider {
               blocks.push(block);
             }
             block.text += evt.delta.text;
+          } else if (evt.type === 'message_delta') {
+            // Carries stop_reason and final output token count.
+            if (evt.delta?.stop_reason) {
+              stopReason = evt.delta.stop_reason;
+            }
+            // evt.usage?.output_tokens captured here but not wired into session
+            // counters in this change (out of scope per spec, see comment in
+            // message_start handler below).
           } else if (evt.type === 'message_start' && evt.message?.usage) {
             // We don't surface token usage back into session counters in this
             // first cut — ClaudeProvider does, but doing it correctly here
@@ -307,24 +456,45 @@ export class ClaudeApiProvider {
     }
 
     blocks.sort((a, b) => a.index - b.index);
-    return blocks.map(b => b.text).join('');
+    return { text: blocks.map(b => b.text).join(''), stopReason };
   }
 
-  private async parseNonStreamingResponse(res: Response): Promise<string> {
-    const data = await res.json() as { content?: Array<{ type: string; text?: string }> };
+  private async parseNonStreamingResponse(res: Response): Promise<ApiResult> {
+    const data = await res.json() as {
+      content?: Array<{ type: string; text?: string }>;
+      stop_reason?: string | null;
+    };
     if (!Array.isArray(data.content)) {
       throw new Error('Non-streaming response missing content array');
     }
-    return data.content
+    const text = data.content
       .filter(block => block.type === 'text' && typeof block.text === 'string')
       .map(block => block.text)
       .join('');
+    return { text, stopReason: data.stop_reason ?? null };
   }
 
   private getModelId(): string {
     const settingsPath = paths.settings();
     const settings = SettingsDefaultsManager.loadFromFile(settingsPath);
     return resolveTierAlias(settings.LIGHT_MEM_MODEL, settings);
+  }
+}
+
+/**
+ * Test-only subclass that exposes `callMessagesApi` as a public method so
+ * tests can inject mock fetch implementations without needing to go through
+ * the full `startSession` / message-generator flow.
+ */
+export class ClaudeApiProviderTestHarness extends ClaudeApiProvider {
+  constructor() {
+    // Pass dummy stubs — test-harness only calls callMessagesApi directly.
+    super(null as any, null as any);
+  }
+
+  // Re-expose as public for test access.
+  callMessagesApi(args: CallArgs, fetchImpl?: typeof fetch): Promise<ApiResult> {
+    return super.callMessagesApi(args, fetchImpl);
   }
 }
 
