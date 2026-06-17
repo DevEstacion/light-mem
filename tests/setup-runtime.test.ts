@@ -7,6 +7,7 @@ import {
   writeInstallMarker,
   isInstallCurrent,
   platformNodeRemediation,
+  fetchTreeSitterCliBinary,
 } from '../src/npx-cli/install/setup-runtime';
 
 describe('setup-runtime install marker', () => {
@@ -120,6 +121,65 @@ describe('setup-runtime install marker', () => {
       expect(text.length).toBeGreaterThan(0);
       expect(text).toContain('Node');
       expect(text).toContain('light-mem install');
+    });
+  });
+
+  // tree-sitter-cli's binary is downloaded by its postinstall, which the main
+  // install skips via --ignore-scripts. fetchTreeSitterCliBinary backfills it
+  // on the npx path. These tests cover the guard conditions and the
+  // non-fatal contract — without ever hitting the network.
+  describe('fetchTreeSitterCliBinary', () => {
+    const isWindows = process.platform === 'win32';
+    const binaryName = isWindows ? 'tree-sitter.exe' : 'tree-sitter';
+
+    function cliDir(): string {
+      return join(tempDir, 'node_modules', 'tree-sitter-cli');
+    }
+
+    it('is a no-op when tree-sitter-cli is not installed (no install.js)', async () => {
+      // No node_modules/tree-sitter-cli at all — must resolve without throwing
+      // and without creating anything.
+      await expect(fetchTreeSitterCliBinary(tempDir)).resolves.toBeUndefined();
+      expect(existsSync(cliDir())).toBe(false);
+    });
+
+    it('is a no-op when the binary is already present (skips re-download)', async () => {
+      mkdirSync(cliDir(), { recursive: true });
+      // A real install.js would attempt a network download; a sentinel one
+      // would mutate a file. We write a sentinel install.js that, if run, would
+      // create a marker — then assert it was NOT run.
+      writeFileSync(join(cliDir(), 'install.js'), 'require("fs").writeFileSync(require("path").join(__dirname,"RAN"),"1");');
+      writeFileSync(join(cliDir(), binaryName), '#!/bin/sh\n'); // pretend the binary exists
+
+      await expect(fetchTreeSitterCliBinary(tempDir)).resolves.toBeUndefined();
+
+      // install.js must NOT have run, because the binary was already present.
+      expect(existsSync(join(cliDir(), 'RAN'))).toBe(false);
+    });
+
+    it('does not throw (degrades gracefully) when install.js fails', async () => {
+      mkdirSync(cliDir(), { recursive: true });
+      // install.js present, binary absent → it will run. Make it exit non-zero.
+      // The function must swallow the error (smart-explore is optional; the
+      // worker does not depend on this binary).
+      writeFileSync(join(cliDir(), 'install.js'), 'process.exit(3);');
+
+      await expect(fetchTreeSitterCliBinary(tempDir)).resolves.toBeUndefined();
+      // No binary was produced, but no throw either.
+      expect(existsSync(join(cliDir(), binaryName))).toBe(false);
+    });
+
+    it('runs install.js when present and binary is missing', async () => {
+      mkdirSync(cliDir(), { recursive: true });
+      // A stand-in install.js that "produces" the binary by writing the file,
+      // proving the function actually invokes the package's installer.
+      writeFileSync(
+        join(cliDir(), 'install.js'),
+        `require("fs").writeFileSync(require("path").join(__dirname, ${JSON.stringify(binaryName)}), "ok");`,
+      );
+
+      await expect(fetchTreeSitterCliBinary(tempDir)).resolves.toBeUndefined();
+      expect(existsSync(join(cliDir(), binaryName))).toBe(true);
     });
   });
 });
