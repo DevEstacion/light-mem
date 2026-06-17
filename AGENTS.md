@@ -2,9 +2,10 @@
 
 Lightweight persistent memory system for **Claude Code** and **OpenCode**. It captures
 tool-usage observations via lifecycle hooks (Claude Code) or an OpenCode plugin, compresses
-them into searchable summaries with the Claude Agent SDK, embeds them in-process
-(potion-base-8M + BM25 hybrid search), and injects relevant context into future sessions.
-TypeScript, Node ≥24, esbuild-bundled worker, SQLite via the built-in `node:sqlite`.
+them into searchable summaries with the Claude Agent SDK (default) or a direct
+Messages API call, embeds them in-process (potion-base-8M + BM25 hybrid search), and
+injects relevant context into future sessions. TypeScript, Node ≥24, esbuild-bundled
+worker, SQLite via the built-in `node:sqlite`.
 
 ## Commands
 
@@ -32,6 +33,7 @@ SQLite DB and an MCP search server. Source lives in `src/`; `plugin/` is **build
 See `file:docs/architecture.md:OVERVIEW` for the system design.
 See `file:docs/architecture.md:DIAGRAM_OVERVIEW` for the architecture diagram.
 See `file:docs/architecture.md:COMPONENTS` for component responsibilities.
+See `file:docs/claude-providers.md` for the SDK vs API provider choice.
 See `file:docs/architecture.md:SERVER_RUNTIME` for the optional multi-tenant server runtime (beta).
 
 ## Conventions
@@ -62,7 +64,10 @@ See `file:docs/workflows.md:DAILY_MAINTENANCE` for the dependency-upgrade routin
   `global.anthropic.*` ids. See `src/npx-cli/install/bedrock-models.ts:1`.
 - **Do NOT edit the changelog** — it is generated automatically.
 - New worker model wiring goes through `src/services/worker/ClaudeProvider.ts:500`
-  (`getModelId` → `resolveTierAlias`).
+  (`getModelId` → `resolveTierAlias`). If you add a new provider, follow the same
+  pattern in `src/services/worker/ClaudeApiProvider.ts:58` (`startSession` signature
+  must match `ClaudeProvider.startSession(session, worker?)` — see
+  `docs/claude-providers.md`).
 
 ## Research
 

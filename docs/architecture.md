@@ -32,6 +32,12 @@ uses the built-in `node:sqlite` module (unflagged in Node 24).
 - **Claude provider** — `src/services/worker/ClaudeProvider.ts`. Spawns the Agent SDK with
   an isolated env (`src/shared/EnvManager.ts`) and the resolved model id
   (`getModelId` → `resolveTierAlias`, `src/services/worker/model-aliases.ts`).
+  Default; requires the `claude` binary on PATH.
+- **Claude API provider** — `src/services/worker/ClaudeApiProvider.ts`. Drop-in sibling
+  that POSTs directly to the Anthropic Messages API (`/v1/messages`) with
+  `stream: true`. No `claude` binary required; works on hosts that only have OpenCode or
+  any other CLI. Selected when `LIGHT_MEM_CLAUDE_PROVIDER=api`. See
+  [`docs/claude-providers.md`](./claude-providers.md) for the full auth matrix.
 - **Embedder** — `src/services/embed/PotionEmbedder.ts` + `WordPieceTokenizer.ts`.
   In-process model2vec (potion-base-8M); model assets in `src/models/potion-base-8m/`.
 - **Vector store** — `src/services/sync/LocalVectorStore.ts`. `vectors` table + hybrid
