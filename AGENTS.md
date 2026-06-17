@@ -63,6 +63,11 @@ See `file:docs/workflows.md:DAILY_MAINTENANCE` for the dependency-upgrade routin
   `claude-haiku-4-5-20251001`) 400; use portable aliases (`haiku`/`sonnet`/`opus`) or
   `global.anthropic.*` ids. See `src/npx-cli/install/bedrock-models.ts:1`.
 - **Do NOT edit the changelog** — it is generated automatically.
+- **Version is single-source from `package.json`.** Never hand-edit a version in
+  another manifest or the `.cjs`. Bump via `npm run version:bump[:minor|:major]`
+  (runs `sync-plugin-manifests.js`), then `npm run build`. The pre-commit hook
+  blocks commits where the version has drifted across manifests or the built
+  `.cjs`. See `file:docs/workflows.md:RELEASE`.
 - New worker model wiring goes through `src/services/worker/ClaudeProvider.ts:500`
   (`getModelId` → `resolveTierAlias`). If you add a new provider, follow the same
   pattern in `src/services/worker/ClaudeApiProvider.ts:58` (`startSession` signature
@@ -71,6 +76,6 @@ See `file:docs/workflows.md:DAILY_MAINTENANCE` for the dependency-upgrade routin
 
 ## Research
 
-- Bedrock model selection: `file:docs/superpowers/specs/2026-06-16-bedrock-aware-model-selection-design.md`
+- API-provider resilience design: `file:docs/superpowers/specs/2026-06-17-claude-api-provider-resilience-design.md`
 
-<!-- BETTER-DOCS-META: {"version":"1.0.0","generated":"2026-06-16T20:20:00Z","gitSha":"1f38daefc1de1816f133f55cbc3fbf65157eb5d9","mode":"auto","stack":"typescript-node24-esbuild-vitest-mcp","hasNested":false,"nestedDirs":[]} -->
+<!-- BETTER-DOCS-META: {"version":"1.0.0","generated":"2026-06-17T21:45:00Z","gitSha":"8b161e16b087b481bfc2b6400f04fbb5fe2dc074","mode":"auto","stack":"typescript-node24-esbuild-vitest-mcp","hasNested":false,"nestedDirs":[]} -->

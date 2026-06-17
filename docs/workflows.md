@@ -22,18 +22,35 @@
 <!-- END:COMMIT_FORMAT -->
 
 <!-- START:RELEASE -->
-Version lives in four manifests that must stay consistent: `package.json`,
-`plugin/package.json`, `plugin/.claude-plugin/plugin.json`, and
-`.claude-plugin/marketplace.json`. The build (`sync-plugin-manifests.js`) propagates the
-root version into the plugin manifests.
+**Every push to `main` cuts a release automatically** via
+`.github/workflows/publish.yml`. There is no manual publish step.
 
-Typical release:
+`package.json` is the single source of truth for the version.
+`scripts/sync-plugin-manifests.js` propagates it into the other four
+version-bearing files (`plugin/package.json`, `.claude-plugin/plugin.json`,
+`plugin/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`), and the
+build bakes it into the worker `.cjs`. The pre-commit hook
+(`scripts/install-hooks.sh` → `bump-version.cjs` in verify mode) blocks any
+commit where these have drifted.
+
+What CI does on each push to `main`:
+1. If `package.json`'s version is already on npm (a plain merge that didn't
+   bump) → auto-bump the patch (`bump-version.cjs`), rebuild, and commit the
+   bump back to `main` (`chore(release): auto-bump to X [skip ci]`).
+2. If it's not yet on npm (a merge that already bumped) → use it as-is.
+3. `npm publish` → push tag `vX.Y.Z` → create the GitHub release.
+
+Bump + publish run in the **same** CI job on purpose: a commit pushed with
+`GITHUB_TOKEN` does not re-trigger the workflow, so the publish must happen in
+the run that does the bump.
+
+To ship a non-patch bump, bump locally before merging — then CI publishes it
+as-is rather than auto-bumping:
 ```bash
-# bump the three source-of-truth manifests (package.json, plugin/package.json, marketplace.json)
-npm run build            # propagates version to plugin.json + verifies Rule A
-git commit && git push   # when asked
+npm run version:bump:minor   # or :major — bumps package.json + syncs manifests
+npm run build                # bakes the version into the .cjs (verifier needs this)
+git commit && git push       # when asked
 ```
-The `light-mem:version-bump` skill automates the full flow (manifests, build, tag, release).
 <!-- END:RELEASE -->
 
 <!-- START:CI_CD -->
