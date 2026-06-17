@@ -71,6 +71,21 @@ export class ClaudeApiProvider {
       );
     }
 
+    // The SDK captures memory_session_id from its first response. Without an
+    // SDK we synthesize one from content_session_id; processAgentResponse
+    // short-circuits storage when memorySessionId is null.
+    if (!session.memorySessionId) {
+      session.memorySessionId = session.contentSessionId;
+      this.dbManager.getSessionStore().ensureMemorySessionIdRegistered(
+        session.sessionDbId,
+        session.contentSessionId
+      );
+      logger.info('SESSION', `Synthesized memory_session_id for API provider`, {
+        sessionId: session.sessionDbId,
+        memorySessionId: session.contentSessionId,
+      });
+    }
+
     logger.info('API', 'Starting direct Messages API session', {
       sessionDbId: session.sessionDbId,
       contentSessionId: session.contentSessionId,
