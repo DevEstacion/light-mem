@@ -1,31 +1,33 @@
 name: publish
 
-# Publishes light-mem to npmjs when package.json version is greater than
-# the currently-published version on the registry.
+# Publishes light-mem to npmjs on every push to main. Policy: every merge to
+# main cuts a new release.
 #
 # Triggered by:
-#   * push to main              — every merge that bumps package.json
+#   * push to main              — every merge
 #   * workflow_dispatch         — manual retry / force republish
 #
 # Flow:
-#   1. Resolve the version in package.json (source of truth).
-#   2. Resolve the latest version on the registry (`npm view light-mem version`).
-#   3. Compare; bail out cleanly if not greater. This means unchanged main
-#      pushes don't republish, and the very first publish works (npm returns
-#      a 404 / empty version, which we treat as "no prior version").
-#   4. npm ci + npm run build (uses the prepublishOnly path: build +
-#      check-postinstall-allowlist).
-#   5. Create annotated git tag v<version> pointing at HEAD, push it back.
-#   6. npm publish --provenance=false (we keep secrets minimal; flip to true
-#      later if you enable npm provenance).
+#   1. Resolve the version in package.json.
+#   2. If that version is already on npm (a plain merge that didn't bump the
+#      version), auto-bump the patch (scripts/bump-version.cjs), rebuild so the
+#      version baked into the worker .cjs matches, and commit the bump back to
+#      main. If it's NOT on npm yet (a merge that already bumped, or the first
+#      publish), use it as-is.
+#   3. npm run build (prepublishOnly path: build + check-postinstall-allowlist).
+#   4. npm publish.
+#   5. Create + push the annotated git tag v<version>, then a GitHub release.
+#
+# Bump + publish run in the SAME job on purpose: a commit pushed with
+# GITHUB_TOKEN does NOT trigger a new workflow run (GitHub loop-prevention), so
+# we can't bump-then-push-and-let-it-re-fire. The committed bump just persists
+# the new version in the repo; the publish in this same run ships it. The
+# concurrency group serializes runs so a fast second merge can't race the
+# push-back.
 #
 # Auth:
-#   NPM_TOKEN secret (Automation token, not a publish token). Walked up in
-#   docs/publishing.md.
-#
-# Why not `npm version` in CI: the pre-commit hook already bumps package.json
-# locally, so by the time we see a main push the version has moved. CI is
-# read-only against package.json here except for the git tag it appends.
+#   NPM_TOKEN secret (Automation token). GITHUB_TOKEN (contents: write) pushes
+#   the bump commit + tag. See docs/publishing.md.
 
 on:
   push:
@@ -62,34 +64,42 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Resolve package.json version
-        id: pkg
+      - name: Resolve & auto-bump version
+        id: ver
+        # Policy: every push to main publishes a release. If the version in
+        # package.json is already on npm (a plain merge that didn't bump), bump
+        # the patch here, rebuild so the version baked into the worker .cjs
+        # matches, and commit the bump back to main. Bump + publish happen in
+        # the SAME run on purpose: a commit pushed with GITHUB_TOKEN does not
+        # trigger a new workflow run, so we cannot rely on a push-back to
+        # re-fire this workflow. The committed bump just persists the new
+        # version in the repo.
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "package.json version: $VERSION"
+          set -euo pipefail
+          CURRENT=$(node -p "require('./package.json').version")
+          echo "package.json version: $CURRENT"
 
-      - name: Resolve published version on npm
-        id: npm
-        # Treat 404 / network error as "no prior version" — first publish.
-        run: |
           set +e
-          PUBLISHED=$(npm view "light-mem@${{ steps.pkg.outputs.version }}" version 2>/dev/null)
-          EXIT=$?
+          PUBLISHED=$(npm view "light-mem@${CURRENT}" version 2>/dev/null)
           set -e
-          if [ $EXIT -ne 0 ] || [ -z "$PUBLISHED" ]; then
-            echo "No published version equal to ${{ steps.pkg.outputs.version }} (first publish or version not yet on registry)."
-            echo "published=" >> "$GITHUB_OUTPUT"
-          else
-            echo "Latest matching published version on registry: $PUBLISHED"
-            echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
-          fi
 
-      - name: Skip if version already published
-        if: steps.npm.outputs.published != ''
-        run: |
-          echo "Version ${{ steps.pkg.outputs.version }} is already on the registry. Skipping publish."
-          exit 0
+          if [ -n "$PUBLISHED" ]; then
+            echo "v${CURRENT} already on npm — auto-bumping patch."
+            node scripts/bump-version.cjs patch
+            npm run build
+            NEW=$(node -p "require('./package.json').version")
+            echo "Bumped ${CURRENT} -> ${NEW}"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            # Commit the bump (package.json + all synced manifests + rebuilt .cjs).
+            git add -A
+            git commit -m "chore(release): auto-bump to ${NEW} [skip ci]"
+            git push origin HEAD:main
+            echo "version=${NEW}" >> "$GITHUB_OUTPUT"
+          else
+            echo "v${CURRENT} not yet on npm — publishing as-is."
+            echo "version=${CURRENT}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build (prepublishOnly path)
         run: npm run build
@@ -108,20 +118,19 @@ jobs:
           rm -f .npmrc
 
       - name: Create git tag
-        # Only annotate + push the tag after a successful publish. If publish
-        # fails above, no tag is created — keeps the repo state consistent
-        # with the registry.
+        # Tag the published version. Runs only after a successful publish, so
+        # the tag never points at a version that isn't on the registry.
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${{ steps.pkg.outputs.version }}" -m "v${{ steps.pkg.outputs.version }}"
-          git push origin "v${{ steps.pkg.outputs.version }}"
+          git tag -a "v${{ steps.ver.outputs.version }}" -m "v${{ steps.ver.outputs.version }}"
+          git push origin "v${{ steps.ver.outputs.version }}"
 
       - name: Create GitHub release
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.pkg.outputs.version }}
+          tag_name: v${{ steps.ver.outputs.version }}
           generate_release_notes: true
           draft: false
-          prerelease: ${{ contains(steps.pkg.outputs.version, '-') }}
+          prerelease: ${{ contains(steps.ver.outputs.version, '-') }}
