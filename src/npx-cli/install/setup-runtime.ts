@@ -220,6 +220,55 @@ export async function installPluginDependencies(targetDir: string): Promise<void
   }
 
   verifyCriticalModules(targetDir);
+
+  // The install above runs with --ignore-scripts (tree-sitter-swift's nested
+  // tree-sitter-cli postinstall can hang). That also skips tree-sitter-cli's
+  // OWN `install` script, which downloads the `tree-sitter` CLI binary from
+  // GitHub releases. Without it, the smart-explore skill (which shells out to
+  // that binary) is broken on every npx install. Run JUST that one package's
+  // installer here, bounded and non-fatal: it is an optional-skill dependency,
+  // not part of the worker's runtime closure (verifyCriticalModules above
+  // already passed), so a failure must degrade smart-explore — not abort the
+  // install. See plugin/scripts/version-check.js, whose marketplace-path
+  // install runs scripts normally and so doesn't need this.
+  await fetchTreeSitterCliBinary(targetDir);
+}
+
+/**
+ * Run tree-sitter-cli's bundled `install.js` to download the `tree-sitter` CLI
+ * binary it normally fetches via its (skipped) postinstall script. Best-effort:
+ * logs and returns on any failure rather than throwing, since smart-explore is
+ * an optional skill and the worker does not depend on this binary.
+ */
+export async function fetchTreeSitterCliBinary(targetDir: string): Promise<void> {
+  const cliDir = join(targetDir, 'node_modules', 'tree-sitter-cli');
+  const installScript = join(cliDir, 'install.js');
+  if (!existsSync(installScript)) return; // package not installed — nothing to do
+
+  const binaryName = IS_WINDOWS ? 'tree-sitter.exe' : 'tree-sitter';
+  if (existsSync(join(cliDir, binaryName))) return; // already present
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      // `node install.js` with cwd in the package dir is exactly what the
+      // skipped postinstall does. It honors HTTPS_PROXY and NODE_EXTRA_CA_CERTS
+      // from the inherited env (needed behind a TLS-inspecting proxy).
+      exec(`"${process.execPath}" install.js`, {
+        cwd: cliDir,
+        timeout: INSTALL_TIMEOUT_MS,
+        maxBuffer: 16 * 1024 * 1024,
+        ...(IS_WINDOWS ? { shell: process.env.ComSpec ?? 'cmd.exe' } : {}),
+      }, (error, stdout, stderr) =>
+        error ? reject(Object.assign(error, { stdout, stderr })) : resolve());
+    });
+  } catch (error) {
+    // Non-fatal: smart-explore degrades, the worker is unaffected.
+    console.warn(
+      `light-mem: tree-sitter CLI binary download failed; the smart-explore skill ` +
+      `will be unavailable until it succeeds (the core memory worker is unaffected). ` +
+      `Re-run \`npx light-mem install\` to retry.\n${describeExecError(error)}`,
+    );
+  }
 }
 
 export function readInstallMarker(targetDir: string): MarkerSchema | null {
