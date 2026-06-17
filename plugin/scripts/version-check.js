@@ -125,6 +125,65 @@ function ensurePluginDependencies(pluginRoot) {
   }
 }
 
+// Backfill the tree-sitter CLI binary the smart-explore skill shells out to.
+//
+// tree-sitter-cli downloads its ~18MB platform binary from GitHub releases in
+// an `install` lifecycle script. On the marketplace path, node_modules is often
+// already populated (by the host's own plugin install) WITHOUT that binary —
+// either the host install used --ignore-scripts, or its postinstall's GitHub
+// fetch failed silently. ensurePluginDependencies() above then short-circuits
+// on the node_modules existence guard and never runs its own (script-enabled)
+// install, so the binary is never fetched. This step runs INDEPENDENT of that
+// guard: it checks the binary directly and, if missing, runs just
+// tree-sitter-cli's own install.js to fetch it.
+//
+// Best-effort and non-fatal: smart-explore is an optional skill and the worker
+// does not depend on this binary, so any failure logs and returns rather than
+// blocking Setup. Idempotent: no-op once the binary is present.
+const TREE_SITTER_CLI_INSTALL_TIMEOUT_MS = 120_000;
+
+function ensureTreeSitterCliBinary(pluginRoot) {
+  const cliDir = join(pluginRoot, NODE_MODULES_DIRNAME, 'tree-sitter-cli');
+  const installScript = join(cliDir, 'install.js');
+  if (!existsSync(installScript)) return; // package not installed — nothing to do
+
+  const binaryName = IS_WINDOWS ? 'tree-sitter.exe' : 'tree-sitter';
+  if (existsSync(join(cliDir, binaryName))) return; // already present — idempotent
+
+  console.error(`${VERSION_CHECK_LOG_PREFIX} fetching tree-sitter CLI binary (smart-explore dependency)...`);
+
+  let result;
+  try {
+    // `node install.js` with cwd in the package dir is exactly what the
+    // (skipped/failed) lifecycle script does. Inherits HTTPS_PROXY and
+    // NODE_EXTRA_CA_CERTS from the env for TLS-inspecting proxies.
+    result = spawnSync(process.execPath, ['install.js'], {
+      cwd: cliDir,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: TREE_SITTER_CLI_INSTALL_TIMEOUT_MS,
+      windowsHide: true,
+    });
+  } catch (err) {
+    const reason = err && err.message ? err.message : String(err);
+    console.error(`${VERSION_CHECK_LOG_PREFIX} tree-sitter CLI binary fetch threw (${reason}); smart-explore will be unavailable until it succeeds`);
+    return;
+  }
+
+  const killedBySignal = result.status === null && !!result.signal;
+  const nonZeroExit = result.status !== null && result.status !== 0;
+  if (result.error || nonZeroExit || killedBySignal) {
+    let reason;
+    if (result.error) reason = result.error.message;
+    else if (killedBySignal) reason = `killed by ${result.signal}`;
+    else reason = `exit ${result.status}`;
+    console.error(`${VERSION_CHECK_LOG_PREFIX} tree-sitter CLI binary fetch failed (${reason}); smart-explore will be unavailable (the memory worker is unaffected)`);
+    return;
+  }
+
+  console.error(`${VERSION_CHECK_LOG_PREFIX} tree-sitter CLI binary installed successfully`);
+}
+
 function resolveRoot() {
   if (process.env.CLAUDE_PLUGIN_ROOT) {
     const root = process.env.CLAUDE_PLUGIN_ROOT;
@@ -142,6 +201,7 @@ const ROOT = resolveRoot();
 if (!ROOT) process.exit(0);
 
 ensurePluginDependencies(ROOT);
+ensureTreeSitterCliBinary(ROOT);
 
 function emitUpgradeHint(message) {
   if (process.env.LIGHT_MEM_CODEX_HOOK === '1') {

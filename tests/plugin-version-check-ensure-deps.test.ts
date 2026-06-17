@@ -208,3 +208,85 @@ describe.skipIf(SKIP_NON_UNIX)('version-check Setup-phase ensurePluginDependenci
     expect(existsSync(join(pluginRoot, FAKE_INSTALLED_MARKER_REL))).toBe(false);
   });
 });
+
+const TS_CLI_INSTALL_DIAGNOSTIC = '[version-check] fetching tree-sitter CLI binary';
+const TS_CLI_SUCCESS_DIAGNOSTIC = '[version-check] tree-sitter CLI binary installed successfully';
+const TS_CLI_FAILURE_DIAGNOSTIC = '[version-check] tree-sitter CLI binary fetch failed';
+const TS_BINARY_NAME = process.platform === 'win32' ? 'tree-sitter.exe' : 'tree-sitter';
+
+// Seed a fake tree-sitter-cli package whose install.js either produces the
+// binary (success) or exits non-zero (failure). Mirrors how the real package's
+// install.js downloads the GitHub binary, without any network.
+function seedTreeSitterCli(pluginRoot: string, behavior: 'success' | 'fail'): string {
+  const cliDir = join(pluginRoot, 'node_modules', 'tree-sitter-cli');
+  mkdirSync(cliDir, { recursive: true });
+  const body = behavior === 'success'
+    // Write the binary file the way the real install.js would, then exit 0.
+    ? `require("fs").writeFileSync(require("path").join(__dirname, ${JSON.stringify(TS_BINARY_NAME)}), "#binary#"); process.exit(0);`
+    // Simulate a failed GitHub fetch.
+    : `console.error("simulated download failure"); process.exit(7);`;
+  writeFileSync(join(cliDir, 'install.js'), body);
+  return cliDir;
+}
+
+describe.skipIf(SKIP_NON_UNIX)('version-check tree-sitter CLI binary backfill (marketplace path)', () => {
+  test('fetches the binary when node_modules exists but the binary is missing', async () => {
+    // THE marketplace scenario (this PR): the host populated node_modules
+    // (zod present) so the bulk-install guard short-circuits — but the
+    // tree-sitter CLI binary was never fetched. The backfill MUST run anyway,
+    // independent of that guard, or smart-explore stays broken.
+    const { pluginRoot, fakeBinDir } = makeFreshPlugin('ts-cli-backfill');
+    mkdirSync(join(pluginRoot, 'node_modules'), { recursive: true }); // triggers bulk-install skip
+    const cliDir = seedTreeSitterCli(pluginRoot, 'success');
+
+    const { stderr, code } = await runVersionCheck(pluginRoot, fakeBinDir);
+
+    expect(code).toBe(0);
+    // Bulk install was skipped (node_modules present)...
+    expect(stderr).not.toContain(INSTALL_DIAGNOSTIC);
+    // ...but the binary backfill still ran and succeeded.
+    expect(stderr).toContain(TS_CLI_INSTALL_DIAGNOSTIC);
+    expect(stderr).toContain(TS_CLI_SUCCESS_DIAGNOSTIC);
+    expect(existsSync(join(cliDir, TS_BINARY_NAME))).toBe(true);
+  });
+
+  test('is a no-op when the binary is already present (idempotent)', async () => {
+    const { pluginRoot, fakeBinDir } = makeFreshPlugin('ts-cli-present');
+    mkdirSync(join(pluginRoot, 'node_modules'), { recursive: true });
+    const cliDir = seedTreeSitterCli(pluginRoot, 'success');
+    // Pre-place the binary; install.js must NOT run (it would overwrite with "#binary#").
+    writeFileSync(join(cliDir, TS_BINARY_NAME), 'PREEXISTING');
+
+    const { stderr, code } = await runVersionCheck(pluginRoot, fakeBinDir);
+
+    expect(code).toBe(0);
+    expect(stderr).not.toContain(TS_CLI_INSTALL_DIAGNOSTIC);
+    expect(readFileSync(join(cliDir, TS_BINARY_NAME), 'utf-8')).toBe('PREEXISTING');
+  });
+
+  test('is a no-op when tree-sitter-cli is not installed (no install.js)', async () => {
+    const { pluginRoot, fakeBinDir } = makeFreshPlugin('ts-cli-absent');
+    mkdirSync(join(pluginRoot, 'node_modules'), { recursive: true });
+    // No tree-sitter-cli dir at all.
+
+    const { stderr, code } = await runVersionCheck(pluginRoot, fakeBinDir);
+
+    expect(code).toBe(0);
+    expect(stderr).not.toContain(TS_CLI_INSTALL_DIAGNOSTIC);
+  });
+
+  test('degrades gracefully (non-fatal) when the binary fetch fails', async () => {
+    // smart-explore is optional; the worker does not depend on this binary, so
+    // a failed fetch must log and continue — Setup still exits 0.
+    const { pluginRoot, fakeBinDir } = makeFreshPlugin('ts-cli-fail');
+    mkdirSync(join(pluginRoot, 'node_modules'), { recursive: true });
+    const cliDir = seedTreeSitterCli(pluginRoot, 'fail');
+
+    const { stderr, code } = await runVersionCheck(pluginRoot, fakeBinDir);
+
+    expect(code).toBe(0); // NON-FATAL — Setup still succeeds
+    expect(stderr).toContain(TS_CLI_INSTALL_DIAGNOSTIC);
+    expect(stderr).toContain(TS_CLI_FAILURE_DIAGNOSTIC);
+    expect(existsSync(join(cliDir, TS_BINARY_NAME))).toBe(false);
+  });
+});
