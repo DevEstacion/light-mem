@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "light-mem",
-      "version": "0.2.5",
+      "version": "0.2.6",
       "source": "./plugin",
       "description": "Lightweight persistent memory for Claude Code and OpenCode. In-process embeddings, no external services."
     }

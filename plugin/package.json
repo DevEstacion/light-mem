@@ -1,6 +1,6 @@
 {
   "name": "light-mem-plugin",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": true,
   "description": "Runtime dependencies for light-mem bundled hooks",
   "type": "module",
