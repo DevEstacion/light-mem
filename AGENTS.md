@@ -34,6 +34,7 @@ See `file:docs/architecture.md:OVERVIEW` for the system design.
 See `file:docs/architecture.md:DIAGRAM_OVERVIEW` for the architecture diagram.
 See `file:docs/architecture.md:COMPONENTS` for component responsibilities.
 See `file:docs/claude-providers.md` for the SDK vs API provider choice.
+See `file:docs/opencode.md` for the OpenCode plugin install flow (covers `ocx`-managed profiles).
 See `file:docs/architecture.md:SERVER_RUNTIME` for the optional multi-tenant server runtime (beta).
 
 ## Conventions
