@@ -2,13 +2,26 @@
 import path from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, unlinkSync } from 'fs';
+import { execFileSync } from 'child_process';
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  copyFileSync,
+  unlinkSync,
+} from 'fs';
 import { logger } from '../../utils/logger.js';
-import { CONTEXT_TAG_OPEN, CONTEXT_TAG_CLOSE, injectContextIntoMarkdownFile } from '../../utils/context-injection.js';
+import {
+  CONTEXT_TAG_OPEN,
+  CONTEXT_TAG_CLOSE,
+  injectContextIntoMarkdownFile,
+} from '../../utils/context-injection.js';
 import { getWorkerPort } from '../../shared/worker-utils.js';
 import { MARKETPLACE_ROOT } from '../../shared/paths.js';
 
-const OPENCODE_PLUGIN_CONFIG_PATH = './plugins/light-mem.js';
+const OPENCODE_NPM_PACKAGE_NAME = 'light-mem';
+const OPENCODE_PLUGIN_BUNDLE_FILENAME = 'light-mem.js';
 
 type OpenCodeConfig = {
   $schema?: string;
@@ -16,73 +29,124 @@ type OpenCodeConfig = {
   [key: string]: unknown;
 };
 
-export function getOpenCodeConfigDirectory(): string {
-  if (process.env.OPENCODE_CONFIG_DIR) {
-    return process.env.OPENCODE_CONFIG_DIR;
-  }
+export function getOpenCodeGlobalConfigDirectory(): string {
   return path.join(homedir(), '.config', 'opencode');
 }
 
-export function getOpenCodePluginsDirectory(): string {
-  return path.join(getOpenCodeConfigDirectory(), 'plugins');
+export function getOpenCodeGlobalPluginsDirectory(): string {
+  return path.join(getOpenCodeGlobalConfigDirectory(), 'plugins');
 }
 
-export function getOpenCodeConfigPath(): string {
-  return path.join(getOpenCodeConfigDirectory(), 'opencode.json');
+export function getOpenCodeGlobalConfigPath(): string {
+  return path.join(getOpenCodeGlobalConfigDirectory(), 'opencode.json');
+}
+
+export function getOpenCodeGlobalPluginPath(): string {
+  return path.join(getOpenCodeGlobalPluginsDirectory(), OPENCODE_PLUGIN_BUNDLE_FILENAME);
+}
+
+export function getOpenCodeGlobalOpencodeJsoncPath(): string {
+  return path.join(getOpenCodeGlobalConfigDirectory(), 'opencode.jsonc');
+}
+
+export function getOpenCodeConfigDirPluginsDirectory(): string | null {
+  const dir = process.env.OPENCODE_CONFIG_DIR;
+  if (!dir) return null;
+  return path.join(dir, 'plugins');
+}
+
+export function getOpenCodeConfigDirPluginPath(): string | null {
+  const dir = getOpenCodeConfigDirPluginsDirectory();
+  if (!dir) return null;
+  return path.join(dir, OPENCODE_PLUGIN_BUNDLE_FILENAME);
 }
 
 export function getOpenCodeAgentsMdPath(): string {
-  return path.join(getOpenCodeConfigDirectory(), 'AGENTS.md');
+  // The injected memory context lives in the global AGENTS.md so any project
+  // started via OpenCode picks it up. The per-project AGENTS.md is left alone
+  // (opencode.ai merges both via its instruction-loading pipeline).
+  return path.join(getOpenCodeGlobalConfigDirectory(), 'AGENTS.md');
 }
 
 export function getInstalledPluginPath(): string {
-  return path.join(getOpenCodePluginsDirectory(), 'light-mem.js');
+  return getOpenCodeGlobalPluginPath();
 }
 
-function getOpenCodePluginEntries(config: OpenCodeConfig): unknown[] {
-  if (Array.isArray(config.plugin)) {
-    return config.plugin;
+function asPluginList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === 'string');
   }
-  return config.plugin === undefined ? [] : [config.plugin];
+  if (typeof value === 'string') {
+    return [value];
+  }
+  return [];
 }
 
-export function addOpenCodePluginReference(config: OpenCodeConfig): OpenCodeConfig {
-  const existingPlugins = getOpenCodePluginEntries(config);
-  if (existingPlugins.includes(OPENCODE_PLUGIN_CONFIG_PATH)) {
+function readOpenCodeConfig(configPath: string): OpenCodeConfig {
+  if (!existsSync(configPath)) {
+    return { $schema: 'https://opencode.ai/config.json' };
+  }
+  try {
+    const raw = readFileSync(configPath, 'utf-8');
+    const parsed = JSON.parse(raw) as OpenCodeConfig;
+    if (typeof parsed !== 'object' || parsed === null) {
+      throw new Error('top-level config is not an object');
+    }
+    return parsed;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`could not parse ${configPath}: ${message}`);
+  }
+}
+
+function writeOpenCodeConfig(configPath: string, config: OpenCodeConfig): void {
+  mkdirSync(path.dirname(configPath), { recursive: true });
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
+}
+
+function hasNpmPluginEntry(config: OpenCodeConfig, packageName: string): boolean {
+  return asPluginList(config.plugin).some(
+    (entry) => entry === packageName || entry.startsWith(`${packageName}@`),
+  );
+}
+
+export function addOpenCodeNpmPluginReference(config: OpenCodeConfig): OpenCodeConfig {
+  if (hasNpmPluginEntry(config, OPENCODE_NPM_PACKAGE_NAME)) {
     return config;
   }
-
   return {
     ...config,
-    plugin: [...existingPlugins, OPENCODE_PLUGIN_CONFIG_PATH],
+    plugin: [...asPluginList(config.plugin), OPENCODE_NPM_PACKAGE_NAME],
   };
 }
 
-export function removeOpenCodePluginReference(config: OpenCodeConfig): OpenCodeConfig {
+export function removeOpenCodeNpmPluginReference(config: OpenCodeConfig): OpenCodeConfig {
   return {
     ...config,
-    plugin: getOpenCodePluginEntries(config).filter(
-      (plugin) => plugin !== OPENCODE_PLUGIN_CONFIG_PATH,
+    plugin: asPluginList(config.plugin).filter(
+      (entry) => entry !== OPENCODE_NPM_PACKAGE_NAME && !entry.startsWith(`${OPENCODE_NPM_PACKAGE_NAME}@`),
     ),
   };
 }
 
-export function registerOpenCodePluginInConfig(): number {
-  const configPath = getOpenCodeConfigPath();
-  const defaultConfig: OpenCodeConfig = {
-    $schema: 'https://opencode.ai/config.json',
-  };
+function registerNpmPluginInGlobalConfig(): number {
+  const jsonPath = getOpenCodeGlobalConfigPath();
+  const jsoncPath = getOpenCodeGlobalOpencodeJsoncPath();
+  // Prefer editing opencode.jsonc (the newer canonical filename) when present
+  // so we don't fight the user's comment-stripped sibling file. Fall back to
+  // opencode.json for users who only have the legacy file.
+  const targetPath = existsSync(jsoncPath) ? jsoncPath : jsonPath;
 
   try {
-    const config = existsSync(configPath)
-      ? JSON.parse(readFileSync(configPath, 'utf-8')) as OpenCodeConfig
-      : defaultConfig;
-    const updatedConfig = addOpenCodePluginReference(config);
-
-    writeFileSync(configPath, `${JSON.stringify(updatedConfig, null, 2)}\n`, 'utf-8');
-    console.log(`  Plugin registered in: ${configPath}`);
-    logger.info('OPENCODE', 'Plugin registered in config', { path: configPath });
-
+    const config = readOpenCodeConfig(targetPath);
+    if (hasNpmPluginEntry(config, OPENCODE_NPM_PACKAGE_NAME)) {
+      console.log(`  Plugin already registered in: ${targetPath}`);
+      return 0;
+    }
+    const updated = addOpenCodeNpmPluginReference(config);
+    writeOpenCodeConfig(targetPath, updated);
+    console.log(`  Plugin registered in: ${targetPath}`);
+    logger.info('OPENCODE', 'Plugin registered in config', { path: targetPath });
     return 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -91,20 +155,21 @@ export function registerOpenCodePluginInConfig(): number {
   }
 }
 
-export function deregisterOpenCodePluginFromConfig(): number {
-  const configPath = getOpenCodeConfigPath();
-  if (!existsSync(configPath)) {
+function deregisterNpmPluginFromGlobalConfig(): number {
+  const jsonPath = getOpenCodeGlobalConfigPath();
+  const jsoncPath = getOpenCodeGlobalOpencodeJsoncPath();
+  const targetPath = existsSync(jsoncPath) ? jsoncPath : jsonPath;
+
+  if (!existsSync(targetPath)) {
     return 0;
   }
 
   try {
-    const config = JSON.parse(readFileSync(configPath, 'utf-8')) as OpenCodeConfig;
-    const updatedConfig = removeOpenCodePluginReference(config);
-
-    writeFileSync(configPath, `${JSON.stringify(updatedConfig, null, 2)}\n`, 'utf-8');
-    console.log(`  Plugin deregistered from: ${configPath}`);
-    logger.info('OPENCODE', 'Plugin deregistered from config', { path: configPath });
-
+    const config = readOpenCodeConfig(targetPath);
+    const updated = removeOpenCodeNpmPluginReference(config);
+    writeOpenCodeConfig(targetPath, updated);
+    console.log(`  Plugin deregistered from: ${targetPath}`);
+    logger.info('OPENCODE', 'Plugin deregistered from config', { path: targetPath });
     return 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -113,17 +178,44 @@ export function deregisterOpenCodePluginFromConfig(): number {
   }
 }
 
-export function findBuiltPluginPath(): string | null {
+function copyPluginBundleTo(destinationDir: string): number {
+  if (!existsSync(destinationDir)) {
+    mkdirSync(destinationDir, { recursive: true });
+  }
+  const builtPluginPath = findBuiltPluginPath();
+  if (!builtPluginPath) {
+    console.error('Could not find built OpenCode plugin bundle.');
+    console.error('  Expected at: dist/opencode-plugin/index.js');
+    console.error('  Run the build first: npm run build');
+    return 1;
+  }
+
+  const destinationPath = path.join(destinationDir, OPENCODE_PLUGIN_BUNDLE_FILENAME);
+  copyFileSync(builtPluginPath, destinationPath);
+  console.log(`  Plugin bundle copied to: ${destinationPath}`);
+  logger.info('OPENCODE', 'Plugin bundle copied', { destination: destinationPath });
+  return 0;
+}
+
+function findBuiltPluginPath(): string | null {
   const possiblePaths = [
     // Installed marketplace copy — plugin tree (build emits here)
-    path.join(MARKETPLACE_ROOT, 'plugin', 'integrations', 'opencode', 'light-mem.js'),
+    path.join(MARKETPLACE_ROOT, 'plugin', 'integrations', 'opencode', OPENCODE_PLUGIN_BUNDLE_FILENAME),
     // Installed marketplace copy — legacy dist layout
     path.join(MARKETPLACE_ROOT, 'dist', 'opencode-plugin', 'index.js'),
     // Dev-tree checkout (repo root)
-    path.join(process.cwd(), 'plugin', 'integrations', 'opencode', 'light-mem.js'),
+    path.join(process.cwd(), 'plugin', 'integrations', 'opencode', OPENCODE_PLUGIN_BUNDLE_FILENAME),
     path.join(process.cwd(), 'dist', 'opencode-plugin', 'index.js'),
     // Relative to this compiled file (fallback)
-    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'dist', 'opencode-plugin', 'index.js'),
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '..',
+      '..',
+      '..',
+      'dist',
+      'opencode-plugin',
+      'index.js',
+    ),
   ];
 
   for (const candidatePath of possiblePaths) {
@@ -135,37 +227,59 @@ export function findBuiltPluginPath(): string | null {
   return null;
 }
 
+function tryNpmInstallGlobal(): boolean {
+  // Delegate to OpenCode's own installer when available. It pins the npm
+  // package version, populates ~/.cache/opencode/packages/, and adds the
+  // plugin entry to the global config in one step. We swallow failures
+  // (e.g. opencode binary not on PATH) and fall back to the manual copy.
+  try {
+    execFileSync('opencode', ['plugin', 'install', OPENCODE_NPM_PACKAGE_NAME, '--global'], {
+      stdio: 'pipe',
+      timeout: 120_000,
+    });
+    console.log(`  Ran: opencode plugin install ${OPENCODE_NPM_PACKAGE_NAME} --global`);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.debug('OPENCODE', 'opencode plugin install --global failed; falling back to manual install', {}, error instanceof Error ? error : new Error(message));
+    return false;
+  }
+}
+
 export function installOpenCodePlugin(): number {
-  const builtPluginPath = findBuiltPluginPath();
-  if (!builtPluginPath) {
-    console.error('Could not find built OpenCode plugin bundle.');
-    console.error('  Expected at: dist/opencode-plugin/index.js');
-    console.error('  Run the build first: npm run build');
-    return 1;
+  // Layered install strategy:
+  //   1. Bundle file at ~/.config/opencode/plugins/light-mem.js
+  //      → OpenCode auto-loads local files in this directory (per docs).
+  //   2. npm-style entry ("light-mem") in ~/.config/opencode/opencode.json
+  //      → OpenCode also installs + loads the npm package as a redundant path.
+  //   3. If OPENCODE_CONFIG_DIR is set (e.g. ocx merge dir), mirror the bundle
+  //      file there so plugins/ stays non-empty after ocx regenerates the dir.
+  //      The npm config edit doesn't need mirroring — the global config is
+  //      merged with OPENCODE_CONFIG_CONTENT by OpenCode's config loader.
+
+  const npmOk = tryNpmInstallGlobal();
+
+  const globalCopyResult = copyPluginBundleTo(getOpenCodeGlobalPluginsDirectory());
+  if (globalCopyResult !== 0) {
+    return globalCopyResult;
   }
 
-  const pluginsDirectory = getOpenCodePluginsDirectory();
-  const destinationPath = getInstalledPluginPath();
+  const configDirPlugins = getOpenCodeConfigDirPluginsDirectory();
+  if (configDirPlugins) {
+    const configDirCopyResult = copyPluginBundleTo(configDirPlugins);
+    if (configDirCopyResult !== 0) {
+      return configDirCopyResult;
+    }
+  }
 
-  try {
-    mkdirSync(pluginsDirectory, { recursive: true });
-
-    copyFileSync(builtPluginPath, destinationPath);
-
-    console.log(`  Plugin installed to: ${destinationPath}`);
-    logger.info('OPENCODE', 'Plugin installed', { destination: destinationPath });
-
-    const registerResult = registerOpenCodePluginInConfig();
+  if (!npmOk) {
+    const registerResult = registerNpmPluginInGlobalConfig();
     if (registerResult !== 0) {
       return registerResult;
     }
-
-    return 0;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`Failed to install OpenCode plugin: ${message}`);
-    return 1;
   }
+
+  return 0;
 }
 
 export function injectContextIntoAgentsMd(contextContent: string): number {
@@ -239,22 +353,25 @@ function writeOrRemoveCleanedAgentsMd(agentsMdPath: string, trimmedContent: stri
   }
 }
 
+function removePluginBundleFrom(destinationDir: string): void {
+  const destinationPath = path.join(destinationDir, OPENCODE_PLUGIN_BUNDLE_FILENAME);
+  if (existsSync(destinationPath)) {
+    unlinkSync(destinationPath);
+    console.log(`  Removed plugin bundle: ${destinationPath}`);
+  }
+}
+
 export function uninstallOpenCodePlugin(): number {
   let hasErrors = false;
 
-  const pluginPath = getInstalledPluginPath();
-  if (existsSync(pluginPath)) {
-    try {
-      unlinkSync(pluginPath);
-      console.log(`  Removed plugin: ${pluginPath}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`  Failed to remove plugin: ${message}`);
-      hasErrors = true;
-    }
+  removePluginBundleFrom(getOpenCodeGlobalPluginsDirectory());
+
+  const configDirPlugins = getOpenCodeConfigDirPluginsDirectory();
+  if (configDirPlugins) {
+    removePluginBundleFrom(configDirPlugins);
   }
 
-  if (deregisterOpenCodePluginFromConfig() !== 0) {
+  if (deregisterNpmPluginFromGlobalConfig() !== 0) {
     hasErrors = true;
   }
 
@@ -296,16 +413,45 @@ export function uninstallOpenCodePlugin(): number {
 export function checkOpenCodeStatus(): number {
   console.log('\nLight-Mem OpenCode Integration Status\n');
 
-  const configDirectory = getOpenCodeConfigDirectory();
-  const pluginPath = getInstalledPluginPath();
+  const configDirectory = getOpenCodeGlobalConfigDirectory();
+  const globalPluginPath = getOpenCodeGlobalPluginPath();
+  const configDirPlugins = getOpenCodeConfigDirPluginsDirectory();
+  const configDirPluginPath = getOpenCodeConfigDirPluginPath();
   const agentsMdPath = getOpenCodeAgentsMdPath();
 
   console.log(`Config directory: ${configDirectory}`);
   console.log(`  Exists: ${existsSync(configDirectory) ? 'yes' : 'no'}`);
+  console.log(`OPENCODE_CONFIG_DIR: ${process.env.OPENCODE_CONFIG_DIR ?? '(unset)'}`);
   console.log('');
 
-  console.log(`Plugin: ${pluginPath}`);
-  console.log(`  Installed: ${existsSync(pluginPath) ? 'yes' : 'no'}`);
+  console.log(`Global plugin bundle: ${globalPluginPath}`);
+  console.log(`  Installed: ${existsSync(globalPluginPath) ? 'yes' : 'no'}`);
+  console.log('');
+
+  if (configDirPlugins && configDirPluginPath) {
+    console.log(`OPENCODE_CONFIG_DIR plugin bundle: ${configDirPluginPath}`);
+    console.log(`  Installed: ${existsSync(configDirPluginPath) ? 'yes' : 'no'}`);
+    console.log('');
+  }
+
+  const configPath = existsSync(getOpenCodeGlobalOpencodeJsoncPath())
+    ? getOpenCodeGlobalOpencodeJsoncPath()
+    : getOpenCodeGlobalConfigPath();
+  if (existsSync(configPath)) {
+    try {
+      const config = readOpenCodeConfig(configPath);
+      const plugins = asPluginList(config.plugin);
+      console.log(`Config file: ${configPath}`);
+      console.log(`  "light-mem" in plugin array: ${hasNpmPluginEntry(config, OPENCODE_NPM_PACKAGE_NAME) ? 'yes' : 'no'}`);
+      console.log(`  All plugins: ${plugins.length === 0 ? '(none)' : plugins.join(', ')}`);
+    } catch (error) {
+      console.log(`Config file: ${configPath}`);
+      console.log(`  Could not read: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  } else {
+    console.log(`Config file: ${configPath}`);
+    console.log(`  Exists: no`);
+  }
   console.log('');
 
   console.log(`Context (AGENTS.md): ${agentsMdPath}`);
@@ -366,14 +512,22 @@ Use light-mem search tools for manual memory queries.`;
   console.log(`
 Installation complete!
 
-Plugin installed to: ${getInstalledPluginPath()}
-Context file: ${getOpenCodeAgentsMdPath()}
+Global plugin bundle:  ${getOpenCodeGlobalPluginPath()}
+Global config:         ${existsSync(getOpenCodeGlobalOpencodeJsoncPath()) ? getOpenCodeGlobalOpencodeJsoncPath() : getOpenCodeGlobalConfigPath()}
+${process.env.OPENCODE_CONFIG_DIR ? `OPENCODE_CONFIG_DIR bundle: ${getOpenCodeConfigDirPluginPath() ?? ''}` : ''}
+Context file:          ${getOpenCodeAgentsMdPath()}
 
 Next steps:
-  1. Start light-mem worker: npx light-mem start
-  2. Restart OpenCode to load the plugin
+  1. Make sure the worker is running: npx light-mem start
+  2. Restart OpenCode to load the plugin (or it will pick up automatically)
   3. Memory capture is automatic from then on
 `);
+  if (process.env.OPENCODE_CONFIG_CONTENT) {
+    console.log(`Note: OPENCODE_CONFIG_CONTENT is set, so OpenCode merges it with the global
+config. The "light-mem" plugin entry in the global config will still be loaded.
+If your toolchain shadows the global config (e.g. ocx), restart OpenCode once
+after install so the plugin loader re-scans ~/.config/opencode/plugins/.`);
+  }
 
   return 0;
 }
