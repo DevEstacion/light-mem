@@ -190,6 +190,29 @@ describe('Plugin Distribution - Setup Hook (#1547)', () => {
     const versionCheckPath = path.join(projectRoot, 'plugin/scripts/version-check.js');
     expect(existsSync(versionCheckPath)).toBe(true);
   });
+
+  // The Setup event only fires under `claude --init-only` / `-p --init` — never
+  // on a normal launch, plugin install, update, or /reload-plugins (verified
+  // against the Claude Code hooks docs). version-check.js does the tree-sitter
+  // CLI binary backfill + missing-dep install, so wiring it ONLY to Setup means
+  // it never runs in practice (the binary went missing after every marketplace
+  // update). It MUST also run on SessionStart. Guards against silent regression
+  // back to Setup-only.
+  it('should also call version-check.js on SessionStart (Setup almost never fires)', () => {
+    const hooksPath = path.join(projectRoot, 'plugin/hooks/hooks.json');
+    const parsed = JSON.parse(readFileSync(hooksPath, 'utf-8'));
+    const sessionStart: any[] = parsed.hooks['SessionStart'] ?? [];
+
+    const commandHooks = sessionStart.flatMap((matcher: any) =>
+      (matcher.hooks ?? []).filter((h: any) => h.type === 'command')
+    );
+    const versionCheckHooks = commandHooks.filter((h: any) =>
+      h.command?.includes('version-check.js')
+    );
+    expect(versionCheckHooks.length).toBeGreaterThan(0);
+    // Must be detached so it doesn't block the 60s SessionStart hook timeout.
+    expect(versionCheckHooks.every((h: any) => /nohup .* &/.test(h.command))).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -212,6 +235,12 @@ const RULE_A_EXPECTATIONS: Record<string, Record<string, string>> = {
     }),
     'SessionStart.0.0': claudeHook(['start'], { trailingJson: { continue: true, suppressOutput: true } }),
     'SessionStart.0.1': claudeHook(['hook', 'claude-code', 'context']),
+    'SessionStart.0.2': buildShellCommand({
+      host: 'claude-code', requireFile: 'version-check.js',
+      trailingCommand: ['node', '"$_P/scripts/version-check.js"'],
+      notFoundMessage: 'light-mem: version-check.js not found',
+      background: true,
+    }),
     'UserPromptSubmit.0.0': claudeHook(['hook', 'claude-code', 'session-init']),
     'PostToolUse.0.0': claudeHook(['hook', 'claude-code', 'observation']),
     'PreToolUse.0.0': claudeHook(['hook', 'claude-code', 'file-context']),

@@ -76,6 +76,18 @@ function shellTemplateManifest(buildShellCommand) {
         }),
         'SessionStart.0.0': claudeHook(['start'], { trailingJson: { continue: true, suppressOutput: true } }),
         'SessionStart.0.1': claudeHook(['hook', 'claude-code', 'context']),
+        // The Setup event almost never fires (only `claude --init-only` / `-p
+        // --init`), so version-check.js — which backfills the tree-sitter CLI
+        // binary and installs missing plugin deps after an update — must also
+        // run on SessionStart. Backgrounded so it never blocks the 60s hook
+        // timeout; node_modules already exists by then, so the bulk-install
+        // guard no-ops and only the ~2s binary fetch runs.
+        'SessionStart.0.2': buildShellCommand({
+          host: 'claude-code', requireFile: 'version-check.js',
+          trailingCommand: ['node', '"$_P/scripts/version-check.js"'],
+          notFoundMessage: 'light-mem: version-check.js not found',
+          background: true,
+        }),
         'UserPromptSubmit.0.0': claudeHook(['hook', 'claude-code', 'session-init']),
         'PostToolUse.0.0': claudeHook(['hook', 'claude-code', 'observation']),
         'PreToolUse.0.0': claudeHook(['hook', 'claude-code', 'file-context']),

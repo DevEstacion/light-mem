@@ -42,6 +42,15 @@ export interface ShellTemplateOptions {
   extraEnv?: Record<string, string>;
   /** Optional trailing JSON echoed after the command (e.g. SessionStart continue marker). */
   trailingJson?: object;
+  /**
+   * Run the trailing command detached (`nohup … >/dev/null 2>&1 &`) so the hook
+   * returns immediately and never blocks the host's hook timeout. Used by the
+   * SessionStart backfill of version-check.js (the Setup event almost never
+   * fires — see CLAUDE.md). POSIX/macOS portable on purpose: `setsid` is NOT
+   * available on macOS, whereas `nohup … &` detaches and survives the hook
+   * shell exiting on both macOS and Linux.
+   */
+  background?: boolean;
   /** stderr message when no candidate root resolves. */
   notFoundMessage: string;
   /**
@@ -250,7 +259,16 @@ export function buildShellCommand(options: ShellTemplateOptions): string {
   if (!options.trailingCommand) {
     throw new Error(`buildShellCommand: host '${options.host}' requires trailingCommand`);
   }
+  if (options.background && options.trailingJson) {
+    throw new Error('buildShellCommand: background and trailingJson are mutually exclusive');
+  }
   let command = `${envPrefix}${options.trailingCommand.join(' ')}`;
+  if (options.background) {
+    // Detach so the hook returns instantly (host hook timeouts don't apply to
+    // the backgrounded child). `nohup … >/dev/null 2>&1 &` is portable across
+    // macOS (no setsid) and Linux; the child survives the hook shell exiting.
+    command = `nohup ${command} >/dev/null 2>&1 &`;
+  }
   if (options.trailingJson) {
     command += `; echo '${JSON.stringify(options.trailingJson)}'`;
   }
