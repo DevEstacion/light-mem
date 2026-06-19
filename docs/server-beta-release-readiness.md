@@ -17,7 +17,7 @@ All Phase 13 exit criteria are met. Zero new test regressions vs. the `main` bas
 
 ## 2. Test Results
 
-### Full sweep (`bun test tests/`)
+### Full sweep (vitest — recorded 2026-05-08)
 
 | Branch                                    | pass | skip | fail |
 | ----------------------------------------- | ---- | ---- | ---- |
@@ -49,10 +49,10 @@ All 45 remaining branch failures are present on `main` and therefore **pre-exist
 
 ### Server-beta-specific suites (clean)
 
-`bun test tests/server/runtime/ tests/server/jobs/ tests/server/generation/ tests/storage/`:
+`npx vitest run tests/server/runtime/ tests/server/jobs/ tests/server/generation/ tests/storage/`:
 **68 pass / 9 skip / 0 fail.**
 
-`bun test tests/compat/sessions-observations-adapter.test.ts tests/hooks/server-beta-client.test.ts`:
+`npx vitest run tests/compat/sessions-observations-adapter.test.ts tests/hooks/server-beta-client.test.ts`:
 **15 pass / 1 skip / 0 fail.**
 
 ---

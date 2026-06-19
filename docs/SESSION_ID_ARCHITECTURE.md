@@ -134,13 +134,13 @@ The test suite validates all critical invariants:
 
 ```bash
 # Run all session ID tests
-bun test tests/session_id_usage_validation.test.ts
+npx vitest run tests/session_id_usage_validation.test.ts
 
 # Run all tests
-bun test
+npm test
 
 # Run with verbose output
-bun test --verbose
+npx vitest run --reporter=verbose
 ```
 
 ## Common Pitfalls

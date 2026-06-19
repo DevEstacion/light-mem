@@ -41,8 +41,8 @@ that:
    live in Valkey, persisted by AOF.
 
 The legacy `light-mem worker` runtime is **not** spawned in Docker. The
-container entrypoint runs `bun server-beta-service.cjs --daemon` (or
-`worker start`) and never `bun worker-service.cjs`.
+container entrypoint runs `node server-beta-service.cjs --daemon` (or
+`worker start`) and never `node worker-service.cjs`.
 
 ## Required environment variables
 

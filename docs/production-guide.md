@@ -7,7 +7,7 @@ Practical guide based on 23 days of production usage with 3,400+ observations ac
 | Setting | Default | Recommended | Why |
 |---------|---------|-------------|-----|
 | LIGHT_MEM_MAX_CONCURRENT_AGENTS | 2 | 3 | Better throughput without overload |
-| LIGHT_MEM_SEMANTIC_INJECT | true | true | Relevant context >> recent context |
+| LIGHT_MEM_SEMANTIC_INJECT | false | true | Relevant context >> recent context |
 | LIGHT_MEM_SEMANTIC_INJECT_LIMIT | 5 | 5 | Sweet spot for token cost vs coverage |
 | LIGHT_MEM_TIER_ROUTING_ENABLED | true | true | ~52% cost savings, no quality loss |
 
@@ -21,7 +21,7 @@ Practical guide based on 23 days of production usage with 3,400+ observations ac
 | pending_messages (failed) | 0 | >0 growing | Circuit-breaker may be tripping |
 | sdk_sessions (active) | 0-3 | >5 stuck | Orphan sessions, worker restart |
 | WAL size | <10 MB | >20 MB | Run `PRAGMA wal_checkpoint(TRUNCATE)` |
-| Chroma size | Growing slowly | Sudden jump | Check for sync loops |
+| Vector store size | Growing slowly | Sudden jump | Check for sync loops |
 | Errors/day in logs | 0-2 | >10 | Investigate log patterns |
 
 ### Quick health check
@@ -41,16 +41,7 @@ sqlite3 ~/.light-mem/light-mem.db "
 
 ## Multi-Machine Setup
 
-If running light-mem on multiple machines, use `light-mem-sync` to keep observations in sync:
-
-```bash
-light-mem-sync push <remote-host>    # local -> remote
-light-mem-sync pull <remote-host>    # remote -> local
-light-mem-sync sync <remote-host>    # bidirectional
-light-mem-sync status <remote-host>  # compare counts
-```
-
-Deduplication is by `(created_at, title)` — safe to run repeatedly.
+<!-- TODO: verify --> The `light-mem-sync` multi-machine sync command described here is not present in the current codebase (`package.json` bin only exports `light-mem`). Multi-machine sync via SQLite can be done manually with `rsync` or `sqlite3 .dump` — deduplication is by `(created_at, title)` so merges are idempotent.
 
 ## Growth Expectations
 
@@ -61,7 +52,7 @@ Based on active daily development usage:
 | Observations | ~120 | ~3,600 | Varies with coding activity |
 | Summaries | ~40 | ~1,200 | One per session |
 | SQLite | ~0.8 MB | ~24 MB | ~5 KB per observation |
-| Chroma | ~4 MB | ~120 MB | ~50 KB per observation (embeddings) |
+| Vector store | ~4 MB | ~120 MB | ~50 KB per observation (in-process potion-base-8M embeddings) |
 
 ## Common Issues and Solutions
 
@@ -71,11 +62,11 @@ Based on active daily development usage:
 **Cause:** Transcript with no assistant messages triggers summary attempt that fails repeatedly.
 **Fix:** PR #1566 — skip summary when transcript is empty.
 
-### Chroma sync failures
+### Vector store sync failures
 
 **Symptom:** `[ERROR] Batch add failed... IDs already exist`
-**Cause:** MCP timeout during add leaves partial writes; retry fails on existing IDs.
-**Fix:** PR #1566 — fallback to delete+add reconciliation.
+**Cause:** Interrupted write leaves partial state; retry fails on existing IDs.
+**Fix:** PR #1566 — fallback to delete+add reconciliation (in-process LocalVectorStore).
 
 ### Port conflict on startup
 
@@ -93,7 +84,7 @@ Based on active daily development usage:
 
 **Symptom:** Claude receives observations about CSS when you're asking about authentication.
 **Cause:** Default recency-based injection selects most recent, not most relevant.
-**Fix:** PR #1568 — semantic injection via Chroma on every prompt.
+**Fix:** PR #1568 — semantic injection via in-process vector store on every prompt (set `LIGHT_MEM_SEMANTIC_INJECT=true`).
 
 ## Log Analysis Tips
 

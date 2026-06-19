@@ -60,7 +60,7 @@ Each one is its own audit trail entry in the PR — but the more interesting sto
 Reading the code top-down, here's what happens when one Claude Code hook fires a tool-use event with `wait=true`:
 
 ```
-Hook → bun-runner → POST /v1/events?wait=true (X-API-Key: cmem_…)
+Hook → node-runner → POST /v1/events?wait=true (X-API-Key: cmem_…)
                      │
                      ▼
             requestIdMiddleware()  [src/server/middleware/request-id.ts]
@@ -137,7 +137,7 @@ The plugin's hook layer hasn't changed — `plugin/hooks/hooks.json` still dispa
 │   └─ Setup / SessionStart hooks                         │
 └──────────────────────────────────────────────────────────┘
                        │
-                       ▼ bun-runner.js dispatches subcommand
+                       ▼ node-runner.js dispatches subcommand
 ┌──────────────────────────────────────────────────────────┐
 │  worker-service.cjs                                      │
 │   ├─ runtime-selector.ts decides:                       │
@@ -314,7 +314,7 @@ Memory in light-mem is **a write-mostly event log with a derived observation vie
             │   /v1/search (FTS GIN)             │
             │   /v1/context (context pack)       │
             │   /v1/observations/:id             │
-            │   Chroma vector embeddings         │
+            │   potion-base-8M + BM25 hybrid     │
             └────────────────────────────────────┘
                        ▲
                        │ derived view
@@ -343,7 +343,7 @@ Memory in light-mem is **a write-mostly event log with a derived observation vie
 
 **Generation is async and horizontally scalable.** The outbox pattern means the queue is a transport optimization; durability lives in Postgres. Scale workers up or down without affecting HTTP latency.
 
-**Reads are tenant-scoped FTS + (future) vector search.** GIN indexes on tsvector columns give sub-100ms search for typical workloads. Chroma plugs in for semantic recall.
+**Reads are tenant-scoped FTS + vector search.** GIN indexes on tsvector columns give sub-100ms search for typical workloads. In-process potion-base-8M embeddings combined with BM25 provide hybrid semantic recall.
 
 ### 9.1 Two queue lanes
 
@@ -404,7 +404,7 @@ This is the "we don't pick winners" property: a team that prefers Gemini for cos
 
 ```bash
 POSTGRES_USER=… POSTGRES_PASSWORD=… POSTGRES_DB=… docker compose exec light-mem-server \
-  bun /opt/light-mem/scripts/server-beta-service.cjs server api-key create \
+  node /opt/light-mem/scripts/server-beta-service.cjs server api-key create \
     --team <team_id> --project <project_id> \
     --scope events:write,sessions:write,observations:read,jobs:read \
     --name alice-laptop

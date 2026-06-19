@@ -152,15 +152,15 @@ were a worker-specific feature and are not exposed by Server beta.
 | `POST /api/corpus/:name/query`      | _(none yet)_                   | _(none)_ | unsupported   |
 | `POST /api/corpus/:name/reprime`    | _(none yet)_                   | _(none)_ | unsupported   |
 
-Corpora are a Chroma-backed worker feature. The Server beta storage layer is
+Corpora are a worker-only feature (backed by the in-process potion-base-8M + BM25 hybrid search engine). The Server beta storage layer is
 Postgres-only. Migration of the corpus subsystem to Server beta is out of
 scope for Phase 9.
 
-## Chroma vector status
+## Embedding / vector search status
 
 | Legacy path                | Native server-beta replacement | Adapter | Status      |
 | -------------------------- | ------------------------------ | ------- | ----------- |
-| `GET /api/chroma/status`   | _(none — server-beta is Postgres-only)_ | _(none)_ | unsupported |
+| `GET /api/chroma/status`   | _(none — server-beta is Postgres-only; in-process potion-base-8M + BM25 search is worker-only)_ | _(none)_ | unsupported |
 
 ## Anti-pattern guards (referenced in Phase 9)
 

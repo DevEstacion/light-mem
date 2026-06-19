@@ -20,7 +20,7 @@ Server-owned tables are created by `ensureServerStorageSchema()` in `src/storage
 
 ## Contracts
 
-Shared Zod contracts live under `src/core/schemas/`. Repository methods parse inputs and outputs through these schemas and store structured fields as JSON `TEXT`, matching the existing Bun SQLite style.
+Shared Zod contracts live under `src/core/schemas/`. Repository methods parse inputs and outputs through these schemas and store structured fields as JSON `TEXT`, matching the existing `node:sqlite` storage style.
 
 ## Observation To Memory Translation
 
