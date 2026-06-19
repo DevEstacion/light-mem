@@ -22,12 +22,14 @@
             "type": "command",
             "shell": "bash",
             "command": "export PATH=\"$($SHELL -lc 'echo $PATH' 2>/dev/null):$PATH\"; _C=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\"; _E=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; _F=; _P=$({ [ -n \"$_E\" ] && printf '%s\\n' \"$_E\"; ls -dt \"$_C/plugins/cache/light-mem/light-mem\"/[0-9]*/ 2>/dev/null; printf '%s\\n' \"$_C/plugins/marketplaces/light-mem/plugin\"; } | while IFS= read -r _R; do _R=\"${_R%/}\"; [ -d \"$_R/plugin/scripts\" ] && _Q=\"$_R/plugin\" || _Q=\"$_R\"; [ -f \"$_Q/scripts/node-runner.js\" ] && [ -f \"$_Q/scripts/worker-service.cjs\" ] && [ -z \"$_F\" ] && { _F=1; printf '%s\\n' \"$_Q\"; }; done); [ -n \"$_P\" ] || { echo \"light-mem: plugin scripts not found\" >&2; exit 1; }; command -v cygpath >/dev/null 2>&1 && { _W=$(cygpath -w \"$_P\" 2>/dev/null); [ -n \"$_W\" ] && _P=\"$_W\"; }; node \"$_P/scripts/node-runner.js\" \"$_P/scripts/worker-service.cjs\" start; echo '{\"continue\":true,\"suppressOutput\":true}'",
+            "statusMessage": "🧠 light-mem: starting memory worker…",
             "timeout": 60
           },
           {
             "type": "command",
             "shell": "bash",
             "command": "export PATH=\"$($SHELL -lc 'echo $PATH' 2>/dev/null):$PATH\"; _C=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\"; _E=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; _F=; _P=$({ [ -n \"$_E\" ] && printf '%s\\n' \"$_E\"; ls -dt \"$_C/plugins/cache/light-mem/light-mem\"/[0-9]*/ 2>/dev/null; printf '%s\\n' \"$_C/plugins/marketplaces/light-mem/plugin\"; } | while IFS= read -r _R; do _R=\"${_R%/}\"; [ -d \"$_R/plugin/scripts\" ] && _Q=\"$_R/plugin\" || _Q=\"$_R\"; [ -f \"$_Q/scripts/node-runner.js\" ] && [ -f \"$_Q/scripts/worker-service.cjs\" ] && [ -z \"$_F\" ] && { _F=1; printf '%s\\n' \"$_Q\"; }; done); [ -n \"$_P\" ] || { echo \"light-mem: plugin scripts not found\" >&2; exit 1; }; command -v cygpath >/dev/null 2>&1 && { _W=$(cygpath -w \"$_P\" 2>/dev/null); [ -n \"$_W\" ] && _P=\"$_W\"; }; node \"$_P/scripts/node-runner.js\" \"$_P/scripts/worker-service.cjs\" hook claude-code context",
+            "statusMessage": "🧠 light-mem: loading memory context…",
             "timeout": 60
           },
           {
@@ -46,6 +48,7 @@
             "type": "command",
             "shell": "bash",
             "command": "export PATH=\"$($SHELL -lc 'echo $PATH' 2>/dev/null):$PATH\"; _C=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\"; _E=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; _F=; _P=$({ [ -n \"$_E\" ] && printf '%s\\n' \"$_E\"; ls -dt \"$_C/plugins/cache/light-mem/light-mem\"/[0-9]*/ 2>/dev/null; printf '%s\\n' \"$_C/plugins/marketplaces/light-mem/plugin\"; } | while IFS= read -r _R; do _R=\"${_R%/}\"; [ -d \"$_R/plugin/scripts\" ] && _Q=\"$_R/plugin\" || _Q=\"$_R\"; [ -f \"$_Q/scripts/node-runner.js\" ] && [ -f \"$_Q/scripts/worker-service.cjs\" ] && [ -z \"$_F\" ] && { _F=1; printf '%s\\n' \"$_Q\"; }; done); [ -n \"$_P\" ] || { echo \"light-mem: plugin scripts not found\" >&2; exit 1; }; command -v cygpath >/dev/null 2>&1 && { _W=$(cygpath -w \"$_P\" 2>/dev/null); [ -n \"$_W\" ] && _P=\"$_W\"; }; node \"$_P/scripts/node-runner.js\" \"$_P/scripts/worker-service.cjs\" hook claude-code session-init",
+            "statusMessage": "🧠 light-mem: preparing context…",
             "timeout": 60
           }
         ]
@@ -59,6 +62,7 @@
             "type": "command",
             "shell": "bash",
             "command": "export PATH=\"$($SHELL -lc 'echo $PATH' 2>/dev/null):$PATH\"; _C=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\"; _E=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; _F=; _P=$({ [ -n \"$_E\" ] && printf '%s\\n' \"$_E\"; ls -dt \"$_C/plugins/cache/light-mem/light-mem\"/[0-9]*/ 2>/dev/null; printf '%s\\n' \"$_C/plugins/marketplaces/light-mem/plugin\"; } | while IFS= read -r _R; do _R=\"${_R%/}\"; [ -d \"$_R/plugin/scripts\" ] && _Q=\"$_R/plugin\" || _Q=\"$_R\"; [ -f \"$_Q/scripts/node-runner.js\" ] && [ -f \"$_Q/scripts/worker-service.cjs\" ] && [ -z \"$_F\" ] && { _F=1; printf '%s\\n' \"$_Q\"; }; done); [ -n \"$_P\" ] || { echo \"light-mem: plugin scripts not found\" >&2; exit 1; }; command -v cygpath >/dev/null 2>&1 && { _W=$(cygpath -w \"$_P\" 2>/dev/null); [ -n \"$_W\" ] && _P=\"$_W\"; }; node \"$_P/scripts/node-runner.js\" \"$_P/scripts/worker-service.cjs\" hook claude-code observation",
+            "statusMessage": "🧠 light-mem…",
             "timeout": 120
           }
         ]
@@ -72,6 +76,7 @@
             "type": "command",
             "shell": "bash",
             "command": "export PATH=\"$($SHELL -lc 'echo $PATH' 2>/dev/null):$PATH\"; _C=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\"; _E=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; _F=; _P=$({ [ -n \"$_E\" ] && printf '%s\\n' \"$_E\"; ls -dt \"$_C/plugins/cache/light-mem/light-mem\"/[0-9]*/ 2>/dev/null; printf '%s\\n' \"$_C/plugins/marketplaces/light-mem/plugin\"; } | while IFS= read -r _R; do _R=\"${_R%/}\"; [ -d \"$_R/plugin/scripts\" ] && _Q=\"$_R/plugin\" || _Q=\"$_R\"; [ -f \"$_Q/scripts/node-runner.js\" ] && [ -f \"$_Q/scripts/worker-service.cjs\" ] && [ -z \"$_F\" ] && { _F=1; printf '%s\\n' \"$_Q\"; }; done); [ -n \"$_P\" ] || { echo \"light-mem: plugin scripts not found\" >&2; exit 1; }; command -v cygpath >/dev/null 2>&1 && { _W=$(cygpath -w \"$_P\" 2>/dev/null); [ -n \"$_W\" ] && _P=\"$_W\"; }; node \"$_P/scripts/node-runner.js\" \"$_P/scripts/worker-service.cjs\" hook claude-code file-context",
+            "statusMessage": "🧠 light-mem: recalling file history…",
             "timeout": 60
           }
         ]
@@ -84,6 +89,7 @@
             "type": "command",
             "shell": "bash",
             "command": "export PATH=\"$($SHELL -lc 'echo $PATH' 2>/dev/null):$PATH\"; _C=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\"; _E=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; _F=; _P=$({ [ -n \"$_E\" ] && printf '%s\\n' \"$_E\"; ls -dt \"$_C/plugins/cache/light-mem/light-mem\"/[0-9]*/ 2>/dev/null; printf '%s\\n' \"$_C/plugins/marketplaces/light-mem/plugin\"; } | while IFS= read -r _R; do _R=\"${_R%/}\"; [ -d \"$_R/plugin/scripts\" ] && _Q=\"$_R/plugin\" || _Q=\"$_R\"; [ -f \"$_Q/scripts/node-runner.js\" ] && [ -f \"$_Q/scripts/worker-service.cjs\" ] && [ -z \"$_F\" ] && { _F=1; printf '%s\\n' \"$_Q\"; }; done); [ -n \"$_P\" ] || { echo \"light-mem: plugin scripts not found\" >&2; exit 1; }; command -v cygpath >/dev/null 2>&1 && { _W=$(cygpath -w \"$_P\" 2>/dev/null); [ -n \"$_W\" ] && _P=\"$_W\"; }; node \"$_P/scripts/node-runner.js\" \"$_P/scripts/worker-service.cjs\" hook claude-code summarize",
+            "statusMessage": "🧠 light-mem: summarizing session…",
             "timeout": 120
           }
         ]
