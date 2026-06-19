@@ -1,64 +1,62 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import { describe, expect, it } from 'vitest';
 import {
-  addOpenCodePluginReference,
-  deregisterOpenCodePluginFromConfig,
-  getOpenCodeConfigPath,
-  removeOpenCodePluginReference,
-  registerOpenCodePluginInConfig,
+  addOpenCodeNpmPluginReference,
+  removeOpenCodeNpmPluginReference,
 } from '../../src/services/integrations/OpenCodeInstaller';
 
-describe('OpenCode installer config registration', () => {
-  let tempDir: string;
-  let previousConfigDir: string | undefined;
-
-  beforeEach(() => {
-    tempDir = join(tmpdir(), `opencode-installer-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    mkdirSync(tempDir, { recursive: true });
-    previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
-    process.env.OPENCODE_CONFIG_DIR = tempDir;
-  });
-
-  afterEach(() => {
-    if (previousConfigDir === undefined) {
-      delete process.env.OPENCODE_CONFIG_DIR;
-    } else {
-      process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
-    }
-    rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  it('adds light-mem to an existing plugin array', () => {
-    const config = addOpenCodePluginReference({
+// The OpenCode rework (commit fa143465) switched plugin registration from
+// file-path refs (./plugins/light-mem.js) to npm-style refs ("light-mem") and
+// made the config-writing functions private (they write to the global
+// ~/.config/opencode dir). The remaining public, side-effect-free surface is
+// the two reference-list transforms below; these tests cover their semantics
+// including the versioned-entry ("light-mem@x.y.z") handling the rework added.
+describe('OpenCode installer plugin-reference transforms', () => {
+  it('adds the npm plugin ref to an existing plugin array, preserving siblings', () => {
+    const config = addOpenCodeNpmPluginReference({
       plugin: ['context-mode'],
       mcp: { context7: { enabled: true } },
     });
 
-    expect(config.plugin).toEqual(['context-mode', './plugins/light-mem.js']);
+    expect(config.plugin).toEqual(['context-mode', 'light-mem']);
     expect(config.mcp).toEqual({ context7: { enabled: true } });
   });
 
   it('does not duplicate an existing light-mem plugin reference', () => {
-    const config = addOpenCodePluginReference({
-      plugin: ['context-mode', './plugins/light-mem.js'],
+    const config = addOpenCodeNpmPluginReference({
+      plugin: ['context-mode', 'light-mem'],
     });
 
-    expect(config.plugin).toEqual(['context-mode', './plugins/light-mem.js']);
+    expect(config.plugin).toEqual(['context-mode', 'light-mem']);
   });
 
-  it('preserves an existing single-string plugin entry', () => {
-    const config = addOpenCodePluginReference({
+  it('treats a version-pinned light-mem entry as already present', () => {
+    const config = addOpenCodeNpmPluginReference({
+      plugin: ['light-mem@1.2.3'],
+    });
+
+    expect(config.plugin).toEqual(['light-mem@1.2.3']);
+  });
+
+  it('normalizes a single-string plugin entry into an array when adding', () => {
+    const config = addOpenCodeNpmPluginReference({
       plugin: 'context-mode',
     });
 
-    expect(config.plugin).toEqual(['context-mode', './plugins/light-mem.js']);
+    expect(config.plugin).toEqual(['context-mode', 'light-mem']);
   });
 
-  it('removes only light-mem from plugin entries', () => {
-    const config = removeOpenCodePluginReference({
-      plugin: ['context-mode', './plugins/light-mem.js'],
+  it('adds the plugin ref when no plugin field exists yet', () => {
+    const config = addOpenCodeNpmPluginReference({
+      $schema: 'https://opencode.ai/config.json',
+    });
+
+    expect(config.$schema).toBe('https://opencode.ai/config.json');
+    expect(config.plugin).toEqual(['light-mem']);
+  });
+
+  it('removes only the light-mem ref, preserving other fields', () => {
+    const config = removeOpenCodeNpmPluginReference({
+      plugin: ['context-mode', 'light-mem'],
       provider: { openai: { models: {} } },
     });
 
@@ -66,42 +64,11 @@ describe('OpenCode installer config registration', () => {
     expect(config.provider).toEqual({ openai: { models: {} } });
   });
 
-  it('creates opencode.json when missing', () => {
-    const result = registerOpenCodePluginInConfig();
+  it('removes a version-pinned light-mem entry too', () => {
+    const config = removeOpenCodeNpmPluginReference({
+      plugin: ['light-mem@2.0.0', 'context-mode'],
+    });
 
-    expect(result).toBe(0);
-    expect(existsSync(getOpenCodeConfigPath())).toBe(true);
-
-    const config = JSON.parse(readFileSync(getOpenCodeConfigPath(), 'utf-8'));
-    expect(config.$schema).toBe('https://opencode.ai/config.json');
-    expect(config.plugin).toEqual(['./plugins/light-mem.js']);
-  });
-
-  it('preserves existing config fields when registering the plugin', () => {
-    writeFileSync(getOpenCodeConfigPath(), JSON.stringify({
-      $schema: 'https://opencode.ai/config.json',
-      plugin: ['context-mode'],
-      provider: { openai: { models: {} } },
-    }), 'utf-8');
-
-    const result = registerOpenCodePluginInConfig();
-
-    expect(result).toBe(0);
-    const config = JSON.parse(readFileSync(getOpenCodeConfigPath(), 'utf-8'));
-    expect(config.plugin).toEqual(['context-mode', './plugins/light-mem.js']);
-    expect(config.provider).toEqual({ openai: { models: {} } });
-  });
-
-  it('removes the plugin reference from opencode.json during deregistration', () => {
-    writeFileSync(getOpenCodeConfigPath(), JSON.stringify({
-      $schema: 'https://opencode.ai/config.json',
-      plugin: ['context-mode', './plugins/light-mem.js'],
-    }), 'utf-8');
-
-    const result = deregisterOpenCodePluginFromConfig();
-
-    expect(result).toBe(0);
-    const config = JSON.parse(readFileSync(getOpenCodeConfigPath(), 'utf-8'));
     expect(config.plugin).toEqual(['context-mode']);
   });
 });
