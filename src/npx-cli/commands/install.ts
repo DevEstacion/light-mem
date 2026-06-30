@@ -118,12 +118,12 @@ function registerMarketplace(): void {
 
   knownMarketplaces['light-mem'] = {
     source: {
-      source: 'github',
-      repo: 'light-mem/light-mem',
+      source: 'directory',
+      path: marketplaceDirectory(),
     },
     installLocation: marketplaceDirectory(),
     lastUpdated: new Date().toISOString(),
-    autoUpdate: true,
+    autoUpdate: false,
   };
 
   ensureDirectoryExists(pluginsDirectory());

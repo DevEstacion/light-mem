@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { execSync } = require('child_process');
-const { existsSync, readFileSync } = require('fs');
+const { existsSync, mkdirSync, readFileSync } = require('fs');
 const path = require('path');
 const os = require('os');
 
@@ -86,6 +86,7 @@ try {
   );
 
   const version = getPluginVersion();
+  mkdirSync(CACHE_BASE_PATH, { recursive: true });
   const CACHE_VERSION_PATH = path.join(CACHE_BASE_PATH, version);
 
   const pluginDir = path.join(rootDir, 'plugin');
