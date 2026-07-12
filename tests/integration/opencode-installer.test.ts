@@ -1,6 +1,9 @@
+import { homedir } from 'os';
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 import {
   addOpenCodeNpmPluginReference,
+  getOpenCodeGlobalPluginsDirectory,
   removeOpenCodeNpmPluginReference,
 } from '../../src/services/integrations/OpenCodeInstaller';
 
@@ -11,6 +14,10 @@ import {
 // the two reference-list transforms below; these tests cover their semantics
 // including the versioned-entry ("light-mem@x.y.z") handling the rework added.
 describe('OpenCode installer plugin-reference transforms', () => {
+  it('uses OpenCode’s documented global plugins directory', () => {
+    expect(getOpenCodeGlobalPluginsDirectory()).toBe(path.join(homedir(), '.config', 'opencode', 'plugins'));
+  });
+
   it('adds the npm plugin ref to an existing plugin array, preserving siblings', () => {
     const config = addOpenCodeNpmPluginReference({
       plugin: ['context-mode'],

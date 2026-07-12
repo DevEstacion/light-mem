@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   LightMemPlugin,
+  server,
   parseSearchResponse,
   REGISTERED_OPENCODE_HOOKS,
   REAL_OPENCODE_EVENT_TYPES,
@@ -53,6 +54,10 @@ afterEach(() => {
 });
 
 describe('OpenCode plugin event contract', () => {
+  it('exports the OpenCode server plugin entrypoint', () => {
+    expect(server).toBe(LightMemPlugin);
+  });
+
   it('only registers hooks that are part of OpenCode\'s real contract', async () => {
     const plugin = await LightMemPlugin(pluginCtx);
     const hookKeys = Object.keys(plugin);

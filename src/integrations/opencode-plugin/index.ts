@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { getWorkerPort } from "../../shared/worker-utils.js";
 
 /**
  * OpenCode plugin event contract.
@@ -91,7 +90,8 @@ interface BusEvent {
 }
 
 function getWorkerBaseUrl(): string {
-  return `http://127.0.0.1:${getWorkerPort()}`;
+  const port = Number.parseInt(process.env.LIGHT_MEM_WORKER_PORT || "37700", 10);
+  return `http://127.0.0.1:${Number.isSafeInteger(port) && port > 0 ? port : 37700}`;
 }
 
 const MAX_TOOL_RESPONSE_LENGTH = 1000;
@@ -332,4 +332,5 @@ export function parseSearchResponse(text: string, query: string): string {
   return rendered;
 }
 
+export const server = LightMemPlugin;
 export default LightMemPlugin;

@@ -469,7 +469,7 @@ async function buildHooks() {
         fs.mkdirSync(opencodeOutDir, { recursive: true });
       }
       await build({
-        entryPoints: ['src/integrations/opencode-plugin/index.ts'],
+        entryPoints: ['src/integrations/opencode-plugin/plugin-entry.ts'],
         bundle: true,
         platform: 'node',
         target: 'node18',
