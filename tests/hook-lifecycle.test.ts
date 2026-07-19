@@ -94,6 +94,103 @@ describe('claudeCodeAdapter session_id fallbacks', () => {
   });
 });
 
+describe('claudeCodeAdapter Grok Build PostToolUse envelope', () => {
+  // Grok loads light-mem as a Claude plugin but feeds camelCase stdin
+  // (docs.x.ai/build/features/hooks). Regression: missing dual-key reads
+  // caused observationHandler to skip every Grok tool event.
+
+  it('should map camelCase tool fields from a Grok PostToolUse payload', async () => {
+    const { claudeCodeAdapter } = await import('../src/cli/adapters/claude-code.js');
+    const input = claudeCodeAdapter.normalizeInput({
+      hookEventName: 'post_tool_use',
+      sessionId: 'grok-sess-1',
+      cwd: '/home/ron/project',
+      workspaceRoot: '/home/ron/project',
+      toolName: 'run_terminal_command',
+      toolInput: { command: 'echo hi', description: 'test' },
+      toolResult: { output: 'hi\n', exitCode: 0 },
+      toolUseId: 'call-abc',
+      timestamp: '2026-07-19T00:00:00Z',
+    });
+
+    expect(input.sessionId).toBe('grok-sess-1');
+    expect(input.cwd).toBe('/home/ron/project');
+    expect(input.toolName).toBe('run_terminal_command');
+    expect(input.toolInput).toEqual({ command: 'echo hi', description: 'test' });
+    expect(input.toolResponse).toEqual({ output: 'hi\n', exitCode: 0 });
+  });
+
+  it('should prefer Claude snake_case when both naming styles are present', async () => {
+    const { claudeCodeAdapter } = await import('../src/cli/adapters/claude-code.js');
+    const input = claudeCodeAdapter.normalizeInput({
+      session_id: 'claude-wins',
+      sessionId: 'grok-loses',
+      cwd: '/tmp',
+      tool_name: 'Bash',
+      toolName: 'run_terminal_command',
+      tool_input: { command: 'claude' },
+      toolInput: { command: 'grok' },
+      tool_response: { out: 'claude' },
+      toolResult: { out: 'grok' },
+    });
+
+    expect(input.sessionId).toBe('claude-wins');
+    expect(input.toolName).toBe('Bash');
+    expect(input.toolInput).toEqual({ command: 'claude' });
+    expect(input.toolResponse).toEqual({ out: 'claude' });
+  });
+
+  it('should fall back to workspaceRoot when cwd is missing (Grok envelope)', async () => {
+    const { claudeCodeAdapter } = await import('../src/cli/adapters/claude-code.js');
+    const input = claudeCodeAdapter.normalizeInput({
+      sessionId: 'no-cwd',
+      workspaceRoot: '/workspace/root',
+      toolName: 'read_file',
+      toolInput: { target_file: '/workspace/root/a.ts' },
+    });
+    expect(input.cwd).toBe('/workspace/root');
+    expect(input.toolName).toBe('read_file');
+  });
+
+  it('should map Grok subagentType to agentType', async () => {
+    const { claudeCodeAdapter } = await import('../src/cli/adapters/claude-code.js');
+    const input = claudeCodeAdapter.normalizeInput({
+      sessionId: 'sub',
+      cwd: '/tmp',
+      toolName: 'search_replace',
+      toolInput: {},
+      subagentType: 'explore',
+    });
+    expect(input.agentType).toBe('explore');
+  });
+});
+
+describe('normalizePlatformSource Grok detection', () => {
+  const originalGrokEvent = process.env.GROK_HOOK_EVENT;
+  const originalGrokSession = process.env.GROK_SESSION_ID;
+
+  afterEach(() => {
+    if (originalGrokEvent === undefined) delete process.env.GROK_HOOK_EVENT;
+    else process.env.GROK_HOOK_EVENT = originalGrokEvent;
+    if (originalGrokSession === undefined) delete process.env.GROK_SESSION_ID;
+    else process.env.GROK_SESSION_ID = originalGrokSession;
+  });
+
+  it('should return grok when GROK_HOOK_EVENT is set (even if CLI platform is claude-code)', async () => {
+    process.env.GROK_HOOK_EVENT = 'post_tool_use';
+    delete process.env.GROK_SESSION_ID;
+    const { normalizePlatformSource } = await import('../src/shared/platform-source.js');
+    expect(normalizePlatformSource('claude-code')).toBe('grok');
+  });
+
+  it('should return claude for claude-code when Grok env is absent', async () => {
+    delete process.env.GROK_HOOK_EVENT;
+    delete process.env.GROK_SESSION_ID;
+    const { normalizePlatformSource } = await import('../src/shared/platform-source.js');
+    expect(normalizePlatformSource('claude-code')).toBe('claude');
+  });
+});
+
 describe('session-init handler undefined prompt', () => {
   it('should not throw when prompt is undefined', () => {
     const rawPrompt: string | undefined = undefined;

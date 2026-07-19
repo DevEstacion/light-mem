@@ -142,7 +142,13 @@ export const fileContextHandler: EventHandler = {
     const filePaths = Array.isArray(toolInput?.filePaths)
       ? (toolInput.filePaths as unknown[]).filter((p): p is string => typeof p === 'string').slice(0, MAX_FILE_CONTEXT_PATHS)
       : [];
-    const filePath = toolInput?.file_path as string | undefined;
+    // Claude Code Read: file_path. Grok read_file: target_file. Some hosts: path / filePath.
+    const filePath = (
+      toolInput?.file_path
+      ?? toolInput?.filePath
+      ?? toolInput?.target_file
+      ?? toolInput?.path
+    ) as string | undefined;
     const candidatePaths = filePaths.length > 0 ? filePaths : (filePath ? [filePath] : []);
 
     if (candidatePaths.length === 0) {
