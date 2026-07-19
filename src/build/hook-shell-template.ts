@@ -73,10 +73,13 @@ const CLAUDE_CODE_SETUP_PATH_PRELUDE =
   'export PATH="$HOME/.nvm/versions/node/v$(ls \\"$HOME/.nvm/versions/node\\" 2>/dev/null | ' +
   "sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)/bin:$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH\";";
 
+// Avoid `${_HP:+…}` / bare required `${_HP}` — Grok pre-expands brace vars in
+// hook commands and fail-skips when unset (same class of bug as ${_R%/}).
 const CODEX_CLI_PATH_PRELUDE =
   `_HP=$(printenv PATH 2>/dev/null || true); ` +
-  `if [ -z "$_HP" ] && [ -n "\${SHELL:-}" ]; then _HP=$("$SHELL" -lc 'printf %s "$PATH"' 2>/dev/null || true); fi; ` +
-  `_HP=$(printf '%s' "$_HP" | tr ' ' ':'); export PATH="\${_HP:+$_HP:}$PATH"; `;
+  `if [ -z "$_HP" ] && [ -n "$SHELL" ]; then _HP=$("$SHELL" -lc 'printf %s "$PATH"' 2>/dev/null || true); fi; ` +
+  `_HP=$(printf '%s' "$_HP" | tr ' ' ':'); ` +
+  `if [ -n "$_HP" ]; then export PATH="$_HP:$PATH"; else export PATH="$PATH"; fi; `;
 
 function pathPrelude(host: ShellTemplateHost): string {
   switch (host) {
@@ -134,8 +137,13 @@ function candidateBlock(options: ShellTemplateOptions): string {
   lines.push(`ls -dt ${allGlobs} 2>/dev/null;`);
   lines.push(`printf '%s\\n' "$_C/plugins/marketplaces/light-mem/plugin";`);
 
-  // The MCP loop trims a trailing slash inline; the hook loop trims via _R="${_R%/}".
-  const trimAssignment = isMcp ? '' : ' _R="${_R%/}";';
+  // Trim trailing slash without shell brace parameter expansion.
+  // Grok Build pre-expands ${VAR} in hook `command` strings and fails closed when
+  // a "required" var is unset (docs.x.ai/build/features/hooks). `${_R%/}` is a
+  // pure shell local (suffix strip) — Grok does not understand `%/` and reports
+  // "required env var(s) not set: ${_R}", so the PostToolUse hook never runs.
+  // Use sed instead; keep "$_R" (unbraced) for ordinary shell locals.
+  const trimAssignment = isMcp ? '' : ' _R=$(printf %s "$_R" | sed "s:/*$::");';
   const fileClause = fileExistsClause(options);
 
   return (
@@ -239,8 +247,15 @@ export function buildShellCommand(options: ShellTemplateOptions): string {
   const prelude = pathPrelude(options.host);
   if (prelude) parts.push(prelude);
 
+  // Host-injected plugin roots. Prefer simple assignments over nested
+  // `${A:-${B:-}}` — Grok Build's command expander mishandles nested braces
+  // and fail-skips the hook before the shell ever runs.
   parts.push('_C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}";');
-  parts.push('_E="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}";');
+  parts.push(
+    '_E="$CLAUDE_PLUGIN_ROOT"; ' +
+    '[ -z "$_E" ] && _E="$PLUGIN_ROOT"; ' +
+    '[ -z "$_E" ] && _E="$GROK_PLUGIN_ROOT";',
+  );
   parts.push(candidateBlock(options));
   parts.push(`[ -n "$_P" ] || { echo "${options.notFoundMessage}" >&2; exit 1; };`);
 

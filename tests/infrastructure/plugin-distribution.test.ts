@@ -213,6 +213,37 @@ describe('Plugin Distribution - Setup Hook (#1547)', () => {
     // Must be detached so it doesn't block the 60s SessionStart hook timeout.
     expect(versionCheckHooks.every((h: any) => /nohup .* &/.test(h.command))).toBe(true);
   });
+
+  // Grok Build expands ${VAR} in hook command strings before spawn and
+  // fail-skips when a "required" var is unset (see docs.x.ai/build/features/hooks).
+  // Shell-local brace expansions like ${_R%/} must never appear in hooks.json.
+  it('must not use shell-local ${ _VAR… } brace expansions (Grok pre-expand)', () => {
+    const hooksPath = path.join(projectRoot, 'plugin/hooks/hooks.json');
+    const parsed = JSON.parse(readFileSync(hooksPath, 'utf-8'));
+    const commands: string[] = [];
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        node.forEach(walk);
+        return;
+      }
+      const rec = node as Record<string, unknown>;
+      if (typeof rec.command === 'string') commands.push(rec.command);
+      Object.values(rec).forEach(walk);
+    };
+    walk(parsed.hooks);
+
+    expect(commands.length).toBeGreaterThan(0);
+    for (const cmd of commands) {
+      expect(cmd).not.toMatch(/\$\{_[A-Za-z0-9_]+/);
+      // Nested ${A:-${B}} confuses Grok's expander — keep plugin-root lookup flat.
+      expect(cmd).not.toMatch(/\$\{[A-Za-z_][A-Za-z0-9_]*:-\$\{/);
+    }
+    // PostToolUse must still trim trailing slashes via sed (not ${_R%/}).
+    const post = commands.find((c) => c.includes('hook claude-code observation'));
+    expect(post).toBeTruthy();
+    expect(post!).toContain('sed "s:/*$::"');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -278,13 +309,16 @@ describe('Spawn-Contract Templating - Rule A generator parity', () => {
   });
 
   it('never leaks a raw ${CLAUDE_PLUGIN_ROOT} into the resolved trailing command', () => {
-    // The placeholder may appear only inside the _E="${CLAUDE_PLUGIN_ROOT:-...}"
-    // expansion, never as a bare `${CLAUDE_PLUGIN_ROOT}` token that would reach
-    // the binary unsubstituted.
+    // Plugin-root lookup is flat assignments (Grok-safe), not nested
+    // `${A:-${B:-}}`. Unbraced $CLAUDE_PLUGIN_ROOT is fine — the shell
+    // expands it; Grok only fail-skips on required braced vars without defaults.
     const shCommands = Object.values(RULE_A_EXPECTATIONS).flatMap((c) => Object.values(c));
     for (const command of shCommands) {
       expect(command).not.toMatch(/\$\{CLAUDE_PLUGIN_ROOT\}(?!:-)/);
-      expect(command).toContain('_E="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"');
+      expect(command).toContain('_E="$CLAUDE_PLUGIN_ROOT"');
+      expect(command).toContain('_E="$PLUGIN_ROOT"');
+      expect(command).toContain('_E="$GROK_PLUGIN_ROOT"');
+      expect(command).not.toMatch(/\$\{[A-Za-z_][A-Za-z0-9_]*:-\$\{/);
     }
     // The MCP node launcher reads env vars directly — it has no `${...}` shell
     // tokens at all, so a raw placeholder can never reach the binary.
