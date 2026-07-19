@@ -4,21 +4,23 @@
  *
  * See `CLAUDE.md` → "Spawn-Contract Resolution". The host-owned config files
  * (`plugin/hooks/hooks.json`, `plugin/hooks/codex-hooks.json`,
- * `plugin/.mcp.json`) embed a defensive POSIX-shell prelude that resolves the
- * plugin root from `${CLAUDE_PLUGIN_ROOT}` (or `${PLUGIN_ROOT}`), then falls
- * back through the host cache directories and the marketplace install dir.
- * Some host versions / cache rotations do NOT inject `CLAUDE_PLUGIN_ROOT`, so
- * the fallback chain is load-bearing (issues #1215, #1533).
+ * `plugin/.mcp.json`) embed a launcher that resolves the plugin root from
+ * host-injected env (`CLAUDE_PLUGIN_ROOT` / `GROK_PLUGIN_ROOT` / `PLUGIN_ROOT`),
+ * then falls back through the host cache directories and the marketplace install
+ * dir. Some host versions / cache rotations do NOT inject the env var, so the
+ * fallback chain is load-bearing (issues #1215, #1533).
  *
- * This module emits those command strings from ONE place so the shape can't
- * drift between the three files. `tests/infrastructure/plugin-distribution.test.ts`
- * asserts the hand-maintained files match the generator output byte-for-byte.
+ * Grok Build pre-expands `$VAR` / `${VAR}` in hook `command` strings and
+ * fail-skips when a required var is unset (docs.x.ai/build/features/hooks).
+ * Shell-local tokens like `$_R` / `$_P` are never in the environment, so any
+ * shell prelude is incompatible with Grok. Claude / Codex / Setup hooks
+ * therefore use a pure `node -e` launcher with ZERO `$` characters.
  *
  * The fallback chain ORDER is contractual and must not change:
- *   1. ${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}   (host-injected env)
+ *   1. CLAUDE_PLUGIN_ROOT / GROK_PLUGIN_ROOT / PLUGIN_ROOT (host-injected env)
  *   2. (mcp only) $PWD/plugin, $PWD               (repo/dev checkout)
- *   3. cache directories (newest first via `ls -dt`)
- *   4. $_C/plugins/marketplaces/light-mem/plugin (marketplace install)
+ *   3. cache directories (newest first via mtime)
+ *   4. marketplaces/light-mem/plugin (marketplace install)
  */
 
 export type ShellTemplateHost = 'claude-code' | 'claude-code-setup' | 'codex-cli' | 'mcp';
@@ -31,24 +33,20 @@ export interface ShellTemplateOptions {
   /** Optional second required script (hooks needing node-runner.js AND worker-service.cjs). */
   requireFileSecondary?: string;
   /**
-   * Trailing command tokens run after `_P` resolves. Tokens are emitted
-   * verbatim (callers pass already-quoted `"$_P/scripts/X"` forms), matching
-   * the hand-authored files. Required for every shell host; the `mcp` host
-   * ignores it (the Node launcher derives its spawn target from `requireFile`),
-   * so mcp callers may omit it.
+   * Trailing command tokens. For Claude/Codex hooks this is typically:
+   *   `node "$_P/scripts/node-runner.js" "$_P/scripts/worker-service.cjs" …args`
+   * The Node launcher rewrites `$_P/scripts/X` tokens to absolute paths after
+   * resolving the plugin root. Required for every non-mcp host.
    */
   trailingCommand?: string[];
-  /** Extra env exports prepended to the trailing command (e.g. LIGHT_MEM_CODEX_HOOK=1). */
+  /** Extra env exports on the spawned process (e.g. LIGHT_MEM_CODEX_HOOK=1). */
   extraEnv?: Record<string, string>;
   /** Optional trailing JSON echoed after the command (e.g. SessionStart continue marker). */
   trailingJson?: object;
   /**
-   * Run the trailing command detached (`nohup … >/dev/null 2>&1 &`) so the hook
-   * returns immediately and never blocks the host's hook timeout. Used by the
-   * SessionStart backfill of version-check.js (the Setup event almost never
-   * fires — see CLAUDE.md). POSIX/macOS portable on purpose: `setsid` is NOT
-   * available on macOS, whereas `nohup … &` detaches and survives the hook
-   * shell exiting on both macOS and Linux.
+   * Run the trailing command detached so the hook returns immediately and never
+   * blocks the host's hook timeout. Used by the SessionStart backfill of
+   * version-check.js.
    */
   background?: boolean;
   /** stderr message when no candidate root resolves. */
@@ -66,95 +64,6 @@ export interface ShellTemplateOptions {
    */
   mcpExtraCacheRoots?: string[];
 }
-
-const CLAUDE_CODE_PATH_PRELUDE = `export PATH="$($SHELL -lc 'echo $PATH' 2>/dev/null):$PATH";`;
-
-const CLAUDE_CODE_SETUP_PATH_PRELUDE =
-  'export PATH="$HOME/.nvm/versions/node/v$(ls \\"$HOME/.nvm/versions/node\\" 2>/dev/null | ' +
-  "sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)/bin:$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH\";";
-
-// Avoid `${_HP:+…}` / bare required `${_HP}` — Grok pre-expands brace vars in
-// hook commands and fail-skips when unset (same class of bug as ${_R%/}).
-const CODEX_CLI_PATH_PRELUDE =
-  `_HP=$(printenv PATH 2>/dev/null || true); ` +
-  `if [ -z "$_HP" ] && [ -n "$SHELL" ]; then _HP=$("$SHELL" -lc 'printf %s "$PATH"' 2>/dev/null || true); fi; ` +
-  `_HP=$(printf '%s' "$_HP" | tr ' ' ':'); ` +
-  `if [ -n "$_HP" ]; then export PATH="$_HP:$PATH"; else export PATH="$PATH"; fi; `;
-
-function pathPrelude(host: ShellTemplateHost): string {
-  switch (host) {
-    case 'claude-code':
-      return CLAUDE_CODE_PATH_PRELUDE;
-    case 'claude-code-setup':
-      return CLAUDE_CODE_SETUP_PATH_PRELUDE;
-    case 'codex-cli':
-      // Trailing space is intentional: join() adds one more → double space
-      // before `_C=`, matching the hand-authored codex-hooks.json.
-      return CODEX_CLI_PATH_PRELUDE;
-    case 'mcp':
-      return '';
-  }
-}
-
-function fileExistsClause(options: ShellTemplateOptions): string {
-  const primary = `[ -f "$_Q/scripts/${options.requireFile}" ]`;
-  if (options.requireFileSecondary) {
-    return `${primary} && [ -f "$_Q/scripts/${options.requireFileSecondary}" ]`;
-  }
-  return primary;
-}
-
-/**
- * Build the candidate-enumeration block. The `{ ...; }` subshell prints one
- * candidate root per line in priority order; the `while` loop picks the first
- * whose `scripts/<requireFile>` exists.
- *
- * The loop must NOT `break` on the first match. Under Cygwin/MSYS shells
- * (Git-Bash on Windows) a `break` closes the pipe's read end while the
- * producer subshell is still writing the remaining candidate lines; the next
- * `printf`/`ls` then writes to a broken pipe, which Cygwin reports as EACCES
- * ("printf: write error: Permission denied") instead of EPIPE — surfacing as a
- * hook failure (issues #2707, #2709). Instead the loop drains every candidate
- * (only a handful) and a `_F` guard prints the FIRST match exactly once, so the
- * producer always completes and no broken-pipe write ever happens. The first
- * match still wins, so the contractual fallback ORDER is unchanged. This is
- * POSIX-clean (no bashisms), so the `mcp` host's `sh -c` loop is fixed too.
- */
-function candidateBlock(options: ShellTemplateOptions): string {
-  const isMcp = options.host === 'mcp';
-
-  const lines: string[] = [`[ -n "$_E" ] && printf '%s\\n' "$_E";`];
-
-  if (isMcp && options.mcpExtraCandidates && options.mcpExtraCandidates.length > 0) {
-    const quoted = options.mcpExtraCandidates.map((candidate) => `"${candidate}"`).join(' ');
-    lines.push(`printf '%s\\n' ${quoted};`);
-  }
-
-  const extraCacheRoots = isMcp && options.mcpExtraCacheRoots ? options.mcpExtraCacheRoots : [];
-  const allGlobs = [...extraCacheRoots, '$_C/plugins/cache/light-mem/light-mem']
-    .map((root) => `"${root}"/[0-9]*/`)
-    .join(' ');
-  lines.push(`ls -dt ${allGlobs} 2>/dev/null;`);
-  lines.push(`printf '%s\\n' "$_C/plugins/marketplaces/light-mem/plugin";`);
-
-  // Trim trailing slash without shell brace parameter expansion.
-  // Grok Build pre-expands ${VAR} in hook `command` strings and fails closed when
-  // a "required" var is unset (docs.x.ai/build/features/hooks). `${_R%/}` is a
-  // pure shell local (suffix strip) — Grok does not understand `%/` and reports
-  // "required env var(s) not set: ${_R}", so the PostToolUse hook never runs.
-  // Use sed instead; keep "$_R" (unbraced) for ordinary shell locals.
-  const trimAssignment = isMcp ? '' : ' _R=$(printf %s "$_R" | sed "s:/*$::");';
-  const fileClause = fileExistsClause(options);
-
-  return (
-    `_F=; _P=$({ ${lines.join(' ')} } | while IFS= read -r _R; do` +
-    `${trimAssignment} [ -d "$_R/plugin/scripts" ] && _Q="$_R/plugin" || _Q="$_R"; ` +
-    `${fileClause} && [ -z "$_F" ] && { _F=1; printf '%s\\n' "$_Q"; }; done);`
-  );
-}
-
-const CYGPATH_CLAUSE =
-  `command -v cygpath >/dev/null 2>&1 && { _W=$(cygpath -w "$_P" 2>/dev/null); [ -n "$_W" ] && _P="$_W"; };`;
 
 /**
  * Translate a shell-token candidate (`$PWD`, `$PWD/x`, `$HOME/x`, `$_C/x`) into
@@ -183,14 +92,7 @@ function shTokenToNode(token: string): string {
  * Windows when Git's `usr/bin` is not on PATH, so the search tools never
  * registered. This emits the `node -e` payload (`.mcp.json` args[1]) that does
  * the same plugin-root discovery in pure Node — no shell dependency — then
- * spawns the resolved server and forwards signals. The candidate order mirrors
- * the POSIX prelude's: $CLAUDE_PLUGIN_ROOT/$PLUGIN_ROOT, mcpExtraCandidates,
- * mtime-sorted cache roots, then the marketplace install dir.
- *
- * Only `requireFile`, `notFoundMessage`, and the mcp* candidate fields are
- * consumed. `trailingCommand`, `extraEnv`, `trailingJson`, and the cygpath
- * clause are intentionally ignored for this host — the spawn target is derived
- * solely from `requireFile`, and the Node launcher needs no shell scaffolding.
+ * spawns the resolved server and forwards signals.
  */
 function buildMcpNodeLauncher(options: ShellTemplateOptions): string {
   const candidates = (options.mcpExtraCandidates ?? []).map(shTokenToNode);
@@ -213,7 +115,7 @@ function buildMcpNodeLauncher(options: ShellTemplateOptions): string {
     `const f=require('fs'),p=require('path'),o=require('os'),c=require('child_process');` +
     `const h=o.homedir();` +
     `const C=process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude');` +
-    `const E=process.env.CLAUDE_PLUGIN_ROOT||process.env.PLUGIN_ROOT||'';` +
+    `const E=process.env.CLAUDE_PLUGIN_ROOT||process.env.GROK_PLUGIN_ROOT||process.env.PLUGIN_ROOT||'';` +
     `const d=process.cwd();` +
     `const L=x=>{try{return f.readdirSync(x).filter(n=>/^\\d/.test(n)).map(n=>p.join(x,n)).filter(z=>{try{return f.statSync(z).isDirectory()}catch{return false}}).sort((a,b)=>f.statSync(b).mtimeMs-f.statSync(a).mtimeMs)}catch{return[]}};` +
     `const K=[${kParts}].filter(Boolean);` +
@@ -227,67 +129,104 @@ function buildMcpNodeLauncher(options: ShellTemplateOptions): string {
 }
 
 /**
- * Build the full single-line shell command string for a Rule A site.
- * The output is byte-compatible with the hand-authored command strings in
- * the host-managed config files.
+ * Parse trailingCommand tokens into script basenames + CLI args.
+ * Accepts historical shell forms: `node "$_P/scripts/foo.js" bar`.
+ */
+function parseTrailingCommand(trailingCommand: string[]): {
+  spawnFiles: string[];
+  spawnArgs: string[];
+} {
+  const spawnFiles: string[] = [];
+  const spawnArgs: string[] = [];
+  for (const raw of trailingCommand) {
+    if (raw === 'node') continue;
+    const unquoted = raw.replace(/^"/, '').replace(/"$/, '');
+    const m = unquoted.match(/^\$_P\/scripts\/(.+)$/);
+    if (m) {
+      spawnFiles.push(m[1]);
+      continue;
+    }
+    spawnArgs.push(unquoted);
+  }
+  if (spawnFiles.length === 0) {
+    throw new Error(
+      'buildHookNodeLauncher: trailingCommand must include at least one "$_P/scripts/…" token',
+    );
+  }
+  return { spawnFiles, spawnArgs };
+}
+
+/**
+ * Pure-Node hook launcher (Grok Build compatible).
+ *
+ * Emits `node -e "…"` with **zero `$` characters**. Grok pre-expands `$VAR` /
+ * `${VAR}` in hook command strings and fail-skips when unset; shell-local
+ * `$_R` / `$_P` therefore never work under Grok even after dropping braces.
+ */
+function buildHookNodeLauncher(options: ShellTemplateOptions): string {
+  if (!options.trailingCommand) {
+    throw new Error(`buildHookNodeLauncher: host '${options.host}' requires trailingCommand`);
+  }
+  if (options.background && options.trailingJson) {
+    throw new Error('buildHookNodeLauncher: background and trailingJson are mutually exclusive');
+  }
+
+  const { spawnFiles, spawnArgs } = parseTrailingCommand(options.trailingCommand);
+
+  const requiredScripts = [
+    options.requireFile,
+    ...(options.requireFileSecondary ? [options.requireFileSecondary] : []),
+  ];
+
+  const notFound = JSON.stringify(`${options.notFoundMessage}\n`);
+  const requiredJson = JSON.stringify(requiredScripts);
+  const filesJson = JSON.stringify(spawnFiles);
+  const argsJson = JSON.stringify(spawnArgs);
+  const extraEnvJson = JSON.stringify(options.extraEnv ?? {});
+  // Double-encode so the value is a JS string literal expression.
+  const trailingJsonExpr = options.trailingJson
+    ? JSON.stringify(JSON.stringify(options.trailingJson))
+    : 'null';
+
+  const program = [
+    `const f=require('fs'),p=require('path'),o=require('os'),c=require('child_process');`,
+    `const h=o.homedir();`,
+    `const C=process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude');`,
+    `const E=process.env.CLAUDE_PLUGIN_ROOT||process.env.GROK_PLUGIN_ROOT||process.env.PLUGIN_ROOT||'';`,
+    `const L=x=>{try{return f.readdirSync(x).filter(n=>/^\\d/.test(n)).map(n=>p.join(x,n)).filter(z=>{try{return f.statSync(z).isDirectory()}catch{return false}}).sort((a,b)=>f.statSync(b).mtimeMs-f.statSync(a).mtimeMs)}catch{return[]}};`,
+    `const K=[E,...L(p.join(C,'plugins','cache','light-mem','light-mem')),p.join(C,'plugins','marketplaces','light-mem','plugin')].filter(Boolean);`,
+    `const need=${requiredJson};`,
+    `let R=null;`,
+    `for(const k of K){const r=f.existsSync(p.join(k,'plugin','scripts'))?p.join(k,'plugin'):k;if(need.every(s=>f.existsSync(p.join(r,'scripts',s)))){R=r;break}}`,
+    `if(!R){process.stderr.write(${notFound});process.exit(1)}`,
+    `const argv=${filesJson}.map(s=>p.join(R,'scripts',s)).concat(${argsJson});`,
+    `const env=Object.assign({},process.env,${extraEnvJson});`,
+    options.background
+      ? `const ch=c.spawn(process.execPath,argv,{stdio:'ignore',detached:true,env:env});ch.unref();process.exit(0);`
+      : `const r=c.spawnSync(process.execPath,argv,{stdio:'inherit',env:env});const j=${trailingJsonExpr};if(j)process.stdout.write(j+'\\n');process.exit(r.status==null?1:r.status);`,
+  ].join('');
+
+  // Hard guard: any `$` would re-trigger Grok's required-env preflight.
+  if (program.includes('$')) {
+    const i = program.indexOf('$');
+    throw new Error(
+      `buildHookNodeLauncher: generated program still contains $ near: ${JSON.stringify(program.slice(Math.max(0, i - 24), i + 24))}`,
+    );
+  }
+
+  const escaped = program.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `node -e "${escaped}"`;
+}
+
+/**
+ * Build the full single-line command string for a Rule A site.
+ *
+ * - `mcp` → pure Node MCP launcher (`.mcp.json` args[1])
+ * - all hook hosts → pure Node hook launcher (Grok/Claude/Codex safe)
  */
 export function buildShellCommand(options: ShellTemplateOptions): string {
-  // MCP uses a cross-platform Node launcher instead of an `sh -c` prelude so it
-  // spawns on Windows without Git Bash (#2792/#2790/#2714/#2461).
   if (options.host === 'mcp') {
     return buildMcpNodeLauncher(options);
   }
-
-  const parts: string[] = [];
-
-  // The PATH prelude is pushed verbatim (including any trailing space). `parts`
-  // are later joined with a single space, so claude-code preludes (no trailing
-  // space) get one separator space, while the codex prelude (one trailing
-  // space) gets two — matching the hand-authored files exactly.
-  const prelude = pathPrelude(options.host);
-  if (prelude) parts.push(prelude);
-
-  // Host-injected plugin roots. Prefer simple assignments over nested
-  // `${A:-${B:-}}` — Grok Build's command expander mishandles nested braces
-  // and fail-skips the hook before the shell ever runs.
-  parts.push('_C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}";');
-  parts.push(
-    '_E="$CLAUDE_PLUGIN_ROOT"; ' +
-    '[ -z "$_E" ] && _E="$PLUGIN_ROOT"; ' +
-    '[ -z "$_E" ] && _E="$GROK_PLUGIN_ROOT";',
-  );
-  parts.push(candidateBlock(options));
-  parts.push(`[ -n "$_P" ] || { echo "${options.notFoundMessage}" >&2; exit 1; };`);
-
-  // cygpath conversion: claude-code + codex-cli. MCP returned early above (it
-  // uses the Node launcher), so every host reaching here needs the clause.
-  parts.push(CYGPATH_CLAUSE);
-
-  const envPrefix = options.extraEnv
-    ? Object.entries(options.extraEnv)
-        .map(([key, value]) => `${key}=${value} `)
-        .join('')
-    : '';
-
-  // Shell hosts always run a trailing command; fail loud rather than emit a
-  // launcher that silently resolves `_P` and then does nothing.
-  if (!options.trailingCommand) {
-    throw new Error(`buildShellCommand: host '${options.host}' requires trailingCommand`);
-  }
-  if (options.background && options.trailingJson) {
-    throw new Error('buildShellCommand: background and trailingJson are mutually exclusive');
-  }
-  let command = `${envPrefix}${options.trailingCommand.join(' ')}`;
-  if (options.background) {
-    // Detach so the hook returns instantly (host hook timeouts don't apply to
-    // the backgrounded child). `nohup … >/dev/null 2>&1 &` is portable across
-    // macOS (no setsid) and Linux; the child survives the hook shell exiting.
-    command = `nohup ${command} >/dev/null 2>&1 &`;
-  }
-  if (options.trailingJson) {
-    command += `; echo '${JSON.stringify(options.trailingJson)}'`;
-  }
-  parts.push(command);
-
-  return parts.join(' ');
+  return buildHookNodeLauncher(options);
 }

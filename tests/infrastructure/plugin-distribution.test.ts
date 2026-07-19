@@ -87,8 +87,9 @@ describe('Plugin Distribution - hooks.json Integrity', () => {
     }
   });
 
-  it('should include CLAUDE_PLUGIN_ROOT fallback in all hook commands (#1215)', () => {
-    const expectedFallbackPath = '$_C/plugins/marketplaces/light-mem/plugin';
+  it('should include marketplace fallback in all hook commands (#1215)', () => {
+    // Pure node -e launcher joins marketplace path segments (no shell $_C/…).
+    const expectedFallbackPath = "'marketplaces','light-mem','plugin'";
 
     for (const command of commandHooksFrom('plugin/hooks/hooks.json')) {
       expect(command).toContain(expectedFallbackPath);
@@ -96,8 +97,8 @@ describe('Plugin Distribution - hooks.json Integrity', () => {
   });
 
   it('should try cache path before marketplaces fallback in all hook commands (#1533)', () => {
-    const cachePath = '$_C/plugins/cache/light-mem/light-mem';
-    const marketplacesPath = '$_C/plugins/marketplaces/light-mem/plugin';
+    const cachePath = "'cache','light-mem','light-mem'";
+    const marketplacesPath = "'marketplaces','light-mem','plugin'";
 
     for (const command of commandHooksFrom('plugin/hooks/hooks.json')) {
       expect(command).toContain(cachePath);
@@ -129,12 +130,15 @@ describe('Plugin Distribution - Startup Root Resolution', () => {
 
   it('Claude hook commands should have config-dir based non-empty fallbacks', () => {
     for (const command of commandHooksFrom('plugin/hooks/hooks.json')) {
-      expect(command).toContain('${CLAUDE_CONFIG_DIR:-$HOME/.claude}');
-      expect(command).toContain('while IFS= read -r _R');
-      expect(command).toContain('$_C/plugins/marketplaces/light-mem/plugin');
-      expect(command).toContain('$_C/plugins/cache/light-mem/light-mem');
-      expect(command).toContain('[ -f "$_Q/scripts/');
-      expect(command).not.toContain('$HOME/.claude/plugins/');
+      // Pure node -e launcher (Grok-safe): no shell `$` tokens at all.
+      expect(command.startsWith('node -e "')).toBe(true);
+      expect(command).not.toContain('$');
+      expect(command).toContain('process.env.CLAUDE_CONFIG_DIR');
+      expect(command).toContain("p.join(h,'.claude')");
+      expect(command).toContain("'cache','light-mem','light-mem'");
+      expect(command).toContain("'marketplaces','light-mem','plugin'");
+      expect(command).toContain('process.env.CLAUDE_PLUGIN_ROOT');
+      expect(command).toContain('process.env.GROK_PLUGIN_ROOT');
     }
   });
 });
@@ -211,13 +215,16 @@ describe('Plugin Distribution - Setup Hook (#1547)', () => {
     );
     expect(versionCheckHooks.length).toBeGreaterThan(0);
     // Must be detached so it doesn't block the 60s SessionStart hook timeout.
-    expect(versionCheckHooks.every((h: any) => /nohup .* &/.test(h.command))).toBe(true);
+    // Node launcher uses spawn({detached:true}) + unref() instead of nohup.
+    expect(versionCheckHooks.every((h: any) =>
+      h.command?.includes('detached:true') && h.command?.includes('unref()')
+    )).toBe(true);
   });
 
-  // Grok Build expands ${VAR} in hook command strings before spawn and
-  // fail-skips when a "required" var is unset (see docs.x.ai/build/features/hooks).
-  // Shell-local brace expansions like ${_R%/} must never appear in hooks.json.
-  it('must not use shell-local ${ _VAR… } brace expansions (Grok pre-expand)', () => {
+  // Grok Build expands $VAR / ${VAR} in hook command strings before spawn and
+  // fail-skips when a required var is unset (docs.x.ai/build/features/hooks).
+  // Hook commands must be pure `node -e` launchers with ZERO `$` characters.
+  it('hook commands must be Grok-safe node -e launchers (no $ tokens)', () => {
     const hooksPath = path.join(projectRoot, 'plugin/hooks/hooks.json');
     const parsed = JSON.parse(readFileSync(hooksPath, 'utf-8'));
     const commands: string[] = [];
@@ -235,14 +242,13 @@ describe('Plugin Distribution - Setup Hook (#1547)', () => {
 
     expect(commands.length).toBeGreaterThan(0);
     for (const cmd of commands) {
-      expect(cmd).not.toMatch(/\$\{_[A-Za-z0-9_]+/);
-      // Nested ${A:-${B}} confuses Grok's expander — keep plugin-root lookup flat.
-      expect(cmd).not.toMatch(/\$\{[A-Za-z_][A-Za-z0-9_]*:-\$\{/);
+      expect(cmd.startsWith('node -e "')).toBe(true);
+      expect(cmd).not.toContain('$');
     }
-    // PostToolUse must still trim trailing slashes via sed (not ${_R%/}).
-    const post = commands.find((c) => c.includes('hook claude-code observation'));
+    const post = commands.find((c) => c.includes('observation'));
     expect(post).toBeTruthy();
-    expect(post!).toContain('sed "s:/*$::"');
+    expect(post!).toContain('process.env.CLAUDE_PLUGIN_ROOT');
+    expect(post!).toContain('process.env.GROK_PLUGIN_ROOT');
   });
 });
 
@@ -308,42 +314,48 @@ describe('Spawn-Contract Templating - Rule A generator parity', () => {
     expect(parsed.mcpServers['mcp-search'].args[1]).toBe(MCP_EXPECTED);
   });
 
-  it('never leaks a raw ${CLAUDE_PLUGIN_ROOT} into the resolved trailing command', () => {
-    // Plugin-root lookup is flat assignments (Grok-safe), not nested
-    // `${A:-${B:-}}`. Unbraced $CLAUDE_PLUGIN_ROOT is fine — the shell
-    // expands it; Grok only fail-skips on required braced vars without defaults.
+  it('never leaks shell ${CLAUDE_PLUGIN_ROOT} tokens into hook commands', () => {
+    // Hook launchers read env via process.env — never shell ${…} / $VAR.
     const shCommands = Object.values(RULE_A_EXPECTATIONS).flatMap((c) => Object.values(c));
     for (const command of shCommands) {
-      expect(command).not.toMatch(/\$\{CLAUDE_PLUGIN_ROOT\}(?!:-)/);
-      expect(command).toContain('_E="$CLAUDE_PLUGIN_ROOT"');
-      expect(command).toContain('_E="$PLUGIN_ROOT"');
-      expect(command).toContain('_E="$GROK_PLUGIN_ROOT"');
-      expect(command).not.toMatch(/\$\{[A-Za-z_][A-Za-z0-9_]*:-\$\{/);
+      expect(command).not.toContain('$');
+      expect(command).toContain('process.env.CLAUDE_PLUGIN_ROOT');
+      expect(command).toContain('process.env.GROK_PLUGIN_ROOT');
+      expect(command).toContain('process.env.PLUGIN_ROOT');
     }
-    // The MCP node launcher reads env vars directly — it has no `${...}` shell
-    // tokens at all, so a raw placeholder can never reach the binary.
     expect(MCP_EXPECTED).not.toContain('${CLAUDE_PLUGIN_ROOT}');
     expect(MCP_EXPECTED).toContain('process.env.CLAUDE_PLUGIN_ROOT');
     expect(MCP_EXPECTED).toContain('process.env.PLUGIN_ROOT');
   });
 });
 
-describe('Spawn-Contract Templating - Rule A shell resolution matrix', () => {
-  // Actually shell-evaluate the generated commands across resolution sources:
+describe('Spawn-Contract Templating - Rule A node launcher resolution matrix', () => {
+  // Evaluate the generated `node -e` launchers across resolution sources:
   // (a) CLAUDE_PLUGIN_ROOT injected, (b) cache fallback hit, (c) all miss.
-  // Replace the trailing exec with `echo "_P=$_P"` so we observe the resolved
-  // root without launching node.
-  function instrument(command: string): string {
-    // Strip everything from the resolved-root guard onward, keep the resolution
-    // pipeline, then print _P. We cut at the cygpath clause / trailing command
-    // by replacing the not-found guard's exit with a print of _P.
-    const cut = command.indexOf('[ -n "$_P" ]');
-    const resolution = cut >= 0 ? command.slice(0, cut) : command;
-    return `${resolution} echo "RESOLVED=$_P"`;
+  // Replace the spawn tail with console.log("RESOLVED="+R).
+
+  function extractProgram(command: string): string {
+    expect(command.startsWith('node -e "')).toBe(true);
+    expect(command.endsWith('"')).toBe(true);
+    const inner = command.slice('node -e "'.length, -1);
+    return inner.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
   }
 
-  function shellEval(command: string, env: Record<string, string>): { status: number | null; stdout: string; stderr: string } {
-    const result = spawnSync('bash', ['-c', command], {
+  function instrument(command: string): string {
+    const program = extractProgram(command);
+    // Do NOT match `const r=` inside the discovery for-loop (`for(const k of K){const r=…}`).
+    // Only cut at the spawn tail.
+    const cut = program.search(/const argv=|const ch=c\.spawn|const r=c\.spawnSync/);
+    const discovery = cut >= 0 ? program.slice(0, cut) : program;
+    const instrumented = `${discovery}console.log("RESOLVED="+R);`;
+    expect(instrumented).not.toContain('$');
+    const reescaped = instrumented.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return `node -e "${reescaped}"`;
+  }
+
+  function nodeEval(command: string, env: Record<string, string>): { status: number | null; stdout: string; stderr: string } {
+    const program = extractProgram(command);
+    const result = spawnSync(process.execPath, ['-e', program], {
       env: { PATH: process.env.PATH ?? '', ...env },
       encoding: 'utf-8',
     });
@@ -357,7 +369,7 @@ describe('Spawn-Contract Templating - Rule A shell resolution matrix', () => {
     );
   };
 
-  it('resolves _P from CLAUDE_PLUGIN_ROOT when the env var points at a valid root', () => {
+  it('resolves R from CLAUDE_PLUGIN_ROOT when the env var points at a valid root', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'cm-root-'));
     mkdirSync(path.join(root, 'scripts'), { recursive: true });
     writeFileSync(path.join(root, 'scripts', 'version-check.js'), '');
@@ -365,7 +377,7 @@ describe('Spawn-Contract Templating - Rule A shell resolution matrix', () => {
     writeFileSync(path.join(root, 'scripts', 'worker-service.cjs'), '');
     try {
       for (const { command } of claudeCommands()) {
-        const { stdout } = shellEval(instrument(command), {
+        const { stdout } = nodeEval(instrument(command), {
           CLAUDE_PLUGIN_ROOT: root,
           HOME: mkdtempSync(path.join(tmpdir(), 'cm-home-')),
         });
@@ -376,7 +388,7 @@ describe('Spawn-Contract Templating - Rule A shell resolution matrix', () => {
     }
   });
 
-  it('resolves _P from the cache directory when CLAUDE_PLUGIN_ROOT is unset', () => {
+  it('resolves R from the cache directory when CLAUDE_PLUGIN_ROOT is unset', () => {
     const home = mkdtempSync(path.join(tmpdir(), 'cm-home-'));
     const cacheRoot = path.join(home, '.claude', 'plugins', 'cache', 'light-mem', 'light-mem', '99.0.0');
     mkdirSync(path.join(cacheRoot, 'scripts'), { recursive: true });
@@ -385,8 +397,7 @@ describe('Spawn-Contract Templating - Rule A shell resolution matrix', () => {
     writeFileSync(path.join(cacheRoot, 'scripts', 'worker-service.cjs'), '');
     try {
       for (const { command } of claudeCommands()) {
-        const { stdout } = shellEval(instrument(command), { HOME: home });
-        // ls -dt yields a trailing slash; the hook trims it via _R="${_R%/}".
+        const { stdout } = nodeEval(instrument(command), { HOME: home });
         expect(stdout).toContain(`RESOLVED=${cacheRoot}`);
       }
     } finally {
@@ -399,10 +410,7 @@ describe('Spawn-Contract Templating - Rule A shell resolution matrix', () => {
     try {
       const parsed = readJson('plugin/hooks/hooks.json');
       const command = hookCommandByPath(parsed, 'UserPromptSubmit.0.0')!;
-      const result = spawnSync('bash', ['-c', command], {
-        env: { PATH: process.env.PATH ?? '', HOME: home },
-        encoding: 'utf-8',
-      });
+      const result = nodeEval(command, { HOME: home });
       expect(result.status).not.toBe(0);
       expect(result.stderr ?? '').toMatch(/light-mem: .* not found/);
     } finally {
