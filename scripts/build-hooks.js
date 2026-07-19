@@ -177,6 +177,107 @@ async function verifyShellTemplateCanonical() {
   }
 
   console.log('✓ Rule A shell templates match the canonical generator');
+
+  // Codex CLI hooks are generated (not hand-edited) from the same shell
+  // template. Codex discovers ~/.codex/hooks.json (learn.chatgpt.com/docs/hooks)
+  // and light-mem installs this template there via CodexInstaller.
+  writeCodexHooksJson(buildShellCommand);
+}
+
+/**
+ * Emit plugin/hooks/codex-hooks.json for Codex CLI.
+ * Reuses the claude-code adapter (Codex stdin is snake_case like Claude) but
+ * sets LIGHT_MEM_CODEX_HOOK=1 so platform_source tags as "codex".
+ */
+function writeCodexHooksJson(buildShellCommand) {
+  console.log('\n📋 Generating plugin/hooks/codex-hooks.json…');
+
+  const codexHook = (tail, extra = {}) => buildShellCommand({
+    host: 'codex-cli',
+    requireFile: 'node-runner.js',
+    requireFileSecondary: 'worker-service.cjs',
+    trailingCommand: [
+      'node', '"$_P/scripts/node-runner.js"', '"$_P/scripts/worker-service.cjs"', ...tail,
+    ],
+    notFoundMessage: 'light-mem: plugin scripts not found',
+    extraEnv: { LIGHT_MEM_CODEX_HOOK: '1' },
+    ...extra,
+  });
+
+  const cmd = (type, command, timeout, statusMessage) => ({
+    type,
+    command,
+    timeout,
+    ...(statusMessage ? { statusMessage } : {}),
+  });
+
+  const document = {
+    description: 'light-mem memory system hooks (Codex CLI)',
+    hooks: {
+      SessionStart: [
+        {
+          matcher: 'startup|resume|clear|compact',
+          hooks: [
+            cmd(
+              'command',
+              codexHook(['start'], { trailingJson: { continue: true, suppressOutput: true } }),
+              60,
+              '🧠 light-mem: starting memory worker…',
+            ),
+            cmd(
+              'command',
+              codexHook(['hook', 'claude-code', 'context']),
+              60,
+              '🧠 light-mem: loading memory context…',
+            ),
+          ],
+        },
+      ],
+      UserPromptSubmit: [
+        {
+          hooks: [
+            cmd(
+              'command',
+              codexHook(['hook', 'claude-code', 'session-init']),
+              60,
+              '🧠 light-mem: preparing context…',
+            ),
+          ],
+        },
+      ],
+      PostToolUse: [
+        {
+          // Codex PostToolUse covers Bash, apply_patch, MCP, and other local
+          // function tools (learn.chatgpt.com/docs/hooks §Tool coverage).
+          hooks: [
+            cmd(
+              'command',
+              codexHook(['hook', 'claude-code', 'observation']),
+              120,
+              '🧠 light-mem…',
+            ),
+          ],
+        },
+      ],
+      Stop: [
+        {
+          hooks: [
+            cmd(
+              'command',
+              codexHook(['hook', 'claude-code', 'summarize']),
+              120,
+              '🧠 light-mem: summarizing session…',
+            ),
+          ],
+        },
+      ],
+    },
+  };
+
+  const outPath = 'plugin/hooks/codex-hooks.json';
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  fs.writeFileSync(outPath, `${JSON.stringify(document, null, 2)}\n`);
+  console.log(`✓ Wrote ${outPath}`);
 }
 
 async function buildHooks() {
@@ -554,6 +655,10 @@ async function buildHooks() {
       console.log(`✓ Copied ${src} → ${dst}`);
     }
 
+    // Generate Codex hooks + verify Rule A templates before the distribution
+    // checklist so plugin/hooks/codex-hooks.json exists when we assert it.
+    await verifyShellTemplateCanonical();
+
     console.log('\n📋 Verifying distribution files...');
     const requiredDistributionFiles = [
       'plugin/skills/mem-search/SKILL.md',
@@ -561,6 +666,7 @@ async function buildHooks() {
       'plugin/skills/how-it-works/SKILL.md',
       'plugin/skills/how-it-works/onboarding-explainer.md',
       'plugin/hooks/hooks.json',
+      'plugin/hooks/codex-hooks.json',
       'plugin/scripts/node-runner.js',
       'plugin/.claude-plugin/plugin.json',
       'plugin/.mcp.json',
@@ -571,8 +677,6 @@ async function buildHooks() {
       }
     }
     console.log('✓ All required distribution files present');
-
-    await verifyShellTemplateCanonical();
 
     console.log('\n✅ All build targets compiled successfully!');
     console.log(`   Output: ${hooksDir}/`);

@@ -298,6 +298,20 @@ export async function runUninstallCommand(): Promise<void> {
       },
     },
     {
+      title: 'Removing Codex hooks integration',
+      task: async () => {
+        try {
+          const { uninstallCodexIntegration } = await import('../../services/integrations/CodexInstaller.js');
+          const result = uninstallCodexIntegration();
+          return result === 0
+            ? `Codex hooks removed ${pc.green('OK')}`
+            : `Codex hooks removal had errors ${pc.yellow('!')}`;
+        } catch {
+          return `Codex hooks not installed ${pc.dim('skipped')}`;
+        }
+      },
+    },
+    {
       title: 'Removing stray light-mem caches and logs',
       task: async () => {
         const removed = removeStrayLightMemPaths();

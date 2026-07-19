@@ -165,29 +165,73 @@ describe('claudeCodeAdapter Grok Build PostToolUse envelope', () => {
   });
 });
 
-describe('normalizePlatformSource Grok detection', () => {
+describe('normalizePlatformSource multi-host detection', () => {
   const originalGrokEvent = process.env.GROK_HOOK_EVENT;
   const originalGrokSession = process.env.GROK_SESSION_ID;
+  const originalCodexHook = process.env.LIGHT_MEM_CODEX_HOOK;
 
   afterEach(() => {
     if (originalGrokEvent === undefined) delete process.env.GROK_HOOK_EVENT;
     else process.env.GROK_HOOK_EVENT = originalGrokEvent;
     if (originalGrokSession === undefined) delete process.env.GROK_SESSION_ID;
     else process.env.GROK_SESSION_ID = originalGrokSession;
+    if (originalCodexHook === undefined) delete process.env.LIGHT_MEM_CODEX_HOOK;
+    else process.env.LIGHT_MEM_CODEX_HOOK = originalCodexHook;
   });
 
   it('should return grok when GROK_HOOK_EVENT is set (even if CLI platform is claude-code)', async () => {
     process.env.GROK_HOOK_EVENT = 'post_tool_use';
     delete process.env.GROK_SESSION_ID;
+    delete process.env.LIGHT_MEM_CODEX_HOOK;
     const { normalizePlatformSource } = await import('../src/shared/platform-source.js');
     expect(normalizePlatformSource('claude-code')).toBe('grok');
   });
 
-  it('should return claude for claude-code when Grok env is absent', async () => {
+  it('should return codex when LIGHT_MEM_CODEX_HOOK=1', async () => {
     delete process.env.GROK_HOOK_EVENT;
     delete process.env.GROK_SESSION_ID;
+    process.env.LIGHT_MEM_CODEX_HOOK = '1';
+    const { normalizePlatformSource } = await import('../src/shared/platform-source.js');
+    expect(normalizePlatformSource('claude-code')).toBe('codex');
+  });
+
+  it('should return claude for claude-code when host env is absent', async () => {
+    delete process.env.GROK_HOOK_EVENT;
+    delete process.env.GROK_SESSION_ID;
+    delete process.env.LIGHT_MEM_CODEX_HOOK;
     const { normalizePlatformSource } = await import('../src/shared/platform-source.js');
     expect(normalizePlatformSource('claude-code')).toBe('claude');
+  });
+
+  it('should map explicit platform labels', async () => {
+    delete process.env.GROK_HOOK_EVENT;
+    delete process.env.GROK_SESSION_ID;
+    delete process.env.LIGHT_MEM_CODEX_HOOK;
+    const { normalizePlatformSource } = await import('../src/shared/platform-source.js');
+    expect(normalizePlatformSource('opencode')).toBe('opencode');
+    expect(normalizePlatformSource('codex-cli')).toBe('codex');
+  });
+});
+
+describe('claudeCodeAdapter Codex Stop envelope', () => {
+  it('should map stop_hook_active and last_assistant_message', async () => {
+    const { claudeCodeAdapter } = await import('../src/cli/adapters/claude-code.js');
+    const input = claudeCodeAdapter.normalizeInput({
+      session_id: 'codex-sess',
+      cwd: '/tmp/project',
+      hook_event_name: 'Stop',
+      stop_hook_active: true,
+      last_assistant_message: 'All tests passed.',
+      turn_id: 'turn-1',
+      permission_mode: 'default',
+      model: 'gpt-5.3-codex',
+    });
+    expect(input.sessionId).toBe('codex-sess');
+    expect(input.stopHookActive).toBe(true);
+    expect(input.lastAssistantMessage).toBe('All tests passed.');
+    expect(input.turnId).toBe('turn-1');
+    expect(input.permissionMode).toBe('default');
+    expect(input.model).toBe('gpt-5.3-codex');
   });
 });
 

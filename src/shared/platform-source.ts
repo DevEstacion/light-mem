@@ -16,9 +16,22 @@ export function isGrokHookProcess(
   return Boolean(env.GROK_HOOK_EVENT || env.GROK_SESSION_ID);
 }
 
+/**
+ * Codex CLI light-mem hooks set LIGHT_MEM_CODEX_HOOK=1 in the shell template
+ * (plugin/hooks/codex-hooks.json). Codex stdin is Claude-compatible snake_case
+ * (learn.chatgpt.com/docs/hooks) so we reuse the claude-code adapter, but tag
+ * the platform as codex for filtering/search.
+ */
+export function isCodexHookProcess(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.LIGHT_MEM_CODEX_HOOK === '1';
+}
+
 export function normalizePlatformSource(value?: string | null): string {
   // Prefer live host detection over the static CLI platform arg.
   if (isGrokHookProcess()) return 'grok';
+  if (isCodexHookProcess()) return 'codex';
 
   if (!value) return DEFAULT_PLATFORM_SOURCE;
 
@@ -27,12 +40,14 @@ export function normalizePlatformSource(value?: string | null): string {
 
   if (source.includes('claude')) return 'claude';
   if (source.includes('grok')) return 'grok';
+  if (source.includes('codex')) return 'codex';
+  if (source.includes('opencode')) return 'opencode';
 
   return source;
 }
 
 export function sortPlatformSources(sources: string[]): string[] {
-  const priority = ['claude'];
+  const priority = ['claude', 'codex', 'grok', 'opencode'];
 
   return [...sources].sort((a, b) => {
     const aPriority = priority.indexOf(a);

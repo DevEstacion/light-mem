@@ -271,6 +271,37 @@ function makeIDETask(ideId: string, summary: InstallSummary): TaskDescriptor | n
       };
     }
 
+    case 'codex': {
+      const allIDEs = detectInstalledIDEs();
+      const ideInfo = allIDEs.find((i) => i.id === ideId);
+      const ideLabel = ideInfo?.label ?? 'Codex CLI';
+      return {
+        title: `${ideLabel}: installing hooks`,
+        task: async (message) => {
+          message('Loading Codex installer…');
+          const { installCodexIntegration } = await import('../../services/integrations/CodexInstaller.js');
+          message('Installing Codex hooks into ~/.codex/hooks.json…');
+          const { result, output } = await bufferConsole(async () => installCodexIntegration());
+          if (result !== 0) {
+            recordFailure(`${ideLabel}: hooks install failed`, output);
+            return `${ideLabel}: hooks install failed ${pc.red('FAIL')}`;
+          }
+          return `${ideLabel}: hooks installed ${pc.green('OK')}`;
+        },
+      };
+    }
+
+    case 'grok': {
+      // Grok Build loads Claude Code plugins (including light-mem hooks.json)
+      // with camelCase stdin; no separate installer — registering the Claude
+      // plugin is sufficient. Surface a clear OK so install --ide grok works.
+      return {
+        title: 'Grok Build: Claude plugin hooks',
+        task: async () =>
+          `Grok Build: uses Claude plugin hooks ${pc.green('OK')} ${pc.dim('(trust folder + /hooks reload)')}`,
+      };
+    }
+
     case 'copilot-cli':
     case 'antigravity':
     case 'goose':

@@ -92,5 +92,21 @@ export function detectInstalledIDEs(): IDEInfo[] {
       supported: true,
       hint: 'plugin-based integration (full capture)',
     },
+    {
+      id: 'codex',
+      label: 'Codex CLI',
+      detected:
+        existsSync(join(home, '.codex')) || isCommandInPath('codex'),
+      supported: true,
+      hint: 'hooks.json integration (SessionStart / PostToolUse / Stop)',
+    },
+    {
+      id: 'grok',
+      label: 'Grok Build',
+      detected:
+        existsSync(join(home, '.grok')) || isCommandInPath('grok'),
+      supported: true,
+      hint: 'loads Claude plugin hooks (camelCase stdin handled)',
+    },
   ];
 }

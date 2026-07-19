@@ -126,6 +126,9 @@ describe('OpenCode plugin event contract', () => {
       const obsBody = obsPost!.body as Record<string, unknown>;
       expect(obsBody.tool_name).toBe('read');
       expect(obsBody.tool_response).toBe('file contents');
+      expect(obsBody.platformSource).toBe('opencode');
+      const initBody = initPost!.body as Record<string, unknown>;
+      expect(initBody.platformSource).toBe('opencode');
     } finally {
       globalThis.fetch = originalFetch;
     }
