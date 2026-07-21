@@ -112,6 +112,102 @@ function writeOpenCodeConfig(configPath: string, config: OpenCodeConfig): void {
   writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
 }
 
+/**
+ * Resolve the absolute path to the bundled `mcp-server.cjs` so the OpenCode
+ * MCP block can `command: ["node", <abs path>]`. Walks the same candidate
+ * chain as the OpenCode plugin: MARKETPLACE_ROOT/plugin, dev tree plugin/,
+ * then the OpenCode global config dir.
+ */
+function resolveInstalledMcpServerPath(): string | null {
+  const candidates: string[] = [];
+  if (MARKETPLACE_ROOT) {
+    candidates.push(path.join(MARKETPLACE_ROOT, 'plugin', 'scripts', 'mcp-server.cjs'));
+  }
+  candidates.push(path.join(process.cwd(), 'plugin', 'scripts', 'mcp-server.cjs'));
+  candidates.push(
+    path.join(getOpenCodeGlobalConfigDirectory(), 'plugins', 'mcp-server.cjs'),
+  );
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Register an MCP search server in the global OpenCode config under
+ * `mcp["light-mem:mcp-search"]`. OpenCode's plugin runtime probes for an MCP
+ * server named `<plugin>:<server>` for any plugin whose name starts with
+ * `light-mem` and would otherwise log `server unavailable` on every session
+ * start. Even if this specific key shape isn't picked up by the runtime,
+ * the MCP server remains available under the same stdio process path for
+ * anything that probes the flat namespace. The plugin itself already exposes
+ * `light_mem_search` as a custom tool — the MCP block is a parallel
+ * search interface.
+ */
+const OPENCODE_MCP_SERVER_KEY = 'light-mem:mcp-search';
+
+function registerMcpServerInGlobalConfig(): number {
+  const jsonPath = getOpenCodeGlobalConfigPath();
+  const jsoncPath = getOpenCodeGlobalOpencodeJsoncPath();
+  const targetPath = existsSync(jsoncPath) ? jsoncPath : jsonPath;
+  const serverPath = resolveInstalledMcpServerPath();
+  if (!serverPath) {
+    console.log('  MCP server: not registered (mcp-server.cjs not found)');
+    return 0;
+  }
+  try {
+    const config = readOpenCodeConfig(targetPath);
+    const mcpBlock =
+      (config as { mcp?: Record<string, unknown> }).mcp ?? {};
+    if (mcpBlock[OPENCODE_MCP_SERVER_KEY]) {
+      return 0;
+    }
+    (config as { mcp?: Record<string, unknown> }).mcp = {
+      ...mcpBlock,
+      [OPENCODE_MCP_SERVER_KEY]: {
+        type: 'local',
+        command: ['node', serverPath],
+        enabled: true,
+      },
+    };
+    writeOpenCodeConfig(targetPath, config);
+    console.log(
+      `  MCP server registered: ${OPENCODE_MCP_SERVER_KEY} → ${serverPath}`,
+    );
+    return 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Failed to register OpenCode MCP server: ${message}`);
+    return 1;
+  }
+}
+
+function deregisterMcpServerFromGlobalConfig(): number {
+  const jsonPath = getOpenCodeGlobalConfigPath();
+  const jsoncPath = getOpenCodeGlobalOpencodeJsoncPath();
+  const targetPath = existsSync(jsoncPath) ? jsoncPath : jsonPath;
+  if (!existsSync(targetPath)) return 0;
+  try {
+    const config = readOpenCodeConfig(targetPath);
+    const mcpBlock =
+      (config as { mcp?: Record<string, unknown> }).mcp;
+    if (!mcpBlock || !mcpBlock[OPENCODE_MCP_SERVER_KEY]) return 0;
+    delete mcpBlock[OPENCODE_MCP_SERVER_KEY];
+    if (Object.keys(mcpBlock).length === 0) {
+      delete (config as { mcp?: Record<string, unknown> }).mcp;
+    } else {
+      (config as { mcp?: Record<string, unknown> }).mcp = mcpBlock;
+    }
+    writeOpenCodeConfig(targetPath, config);
+    console.log(`  MCP server deregistered: ${OPENCODE_MCP_SERVER_KEY}`);
+    return 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Failed to deregister OpenCode MCP server: ${message}`);
+    return 1;
+  }
+}
+
 function hasNpmPluginEntry(config: OpenCodeConfig, packageName: string): boolean {
   return asPluginList(config.plugin).some(
     (entry) => entry === packageName || entry.startsWith(`${packageName}@`),
@@ -310,6 +406,13 @@ export function installOpenCodePlugin(): number {
     }
   }
 
+  // Register the MCP search server so OpenCode doesn't log
+  // `server unavailable key=light-mem:mcp-search` on every session start.
+  const mcpResult = registerMcpServerInGlobalConfig();
+  if (mcpResult !== 0) {
+    return mcpResult;
+  }
+
   return 0;
 }
 
@@ -418,6 +521,10 @@ export function uninstallOpenCodePlugin(): number {
   }
 
   if (deregisterNpmPluginFromGlobalConfig() !== 0) {
+    hasErrors = true;
+  }
+
+  if (deregisterMcpServerFromGlobalConfig() !== 0) {
     hasErrors = true;
   }
 
