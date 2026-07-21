@@ -223,10 +223,17 @@ function buildHookNodeLauncher(options: ShellTemplateOptions): string {
  *
  * - `mcp` → pure Node MCP launcher (`.mcp.json` args[1])
  * - all hook hosts → pure Node hook launcher (Grok/Claude/Codex safe)
+ *
+ * Every hook command is prefixed with a login-shell PATH bootstrap
+ * (matching claude-mem).  `$SHELL` / `$PATH` are real OS env vars,
+ * so Grok's `$VAR` pre-expansion handles them correctly — only
+ * shell-locals trigger the fail-skip bug.
  */
 export function buildShellCommand(options: ShellTemplateOptions): string {
-  if (options.host === 'mcp') {
-    return buildMcpNodeLauncher(options);
-  }
-  return buildHookNodeLauncher(options);
+  const inner =
+    options.host === 'mcp' ? buildMcpNodeLauncher(options) : buildHookNodeLauncher(options);
+
+  // Login-shell PATH recovery: hooks inherit the host agent's PATH
+  // (which often lacks `node` on Windows/nvm setups).
+  return `export PATH="$(\\$SHELL -lc 'echo \\$PATH' 2>/dev/null):\\$PATH"; ${inner}`;
 }
