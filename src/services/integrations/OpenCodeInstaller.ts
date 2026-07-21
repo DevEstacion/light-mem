@@ -285,6 +285,11 @@ export function installOpenCodePlugin(): number {
 
   const npmOk = tryNpmInstallGlobal();
 
+  // Remove the legacy single-file install location. Pre-shim copies landed in
+  // ~/.config/opencode/plugin/light-mem.js, and OpenCode auto-loads BOTH the
+  // legacy `plugin/` dir and the new `plugins/` dir, which would log twice.
+  removeLegacySingleFileInstall();
+
   const globalCopyResult = copyPluginBundleTo(getOpenCodeGlobalPluginsDirectory());
   if (globalCopyResult !== 0) {
     return globalCopyResult;
@@ -387,6 +392,21 @@ function removePluginBundleFrom(destinationDir: string): void {
   }
 }
 
+/**
+ * Older light-mem versions dropped a single `light-mem.js` into
+ * `~/.config/opencode/plugin/` (singular). OpenCode auto-loads files in BOTH
+ * the legacy `plugin/` and the new `plugins/` directories, so a leftover
+ * legacy file made light-mem log twice on every session start. Clear it.
+ */
+function removeLegacySingleFileInstall(): void {
+  const legacyDir = path.join(getOpenCodeGlobalConfigDirectory(), 'plugin');
+  const legacyPath = path.join(legacyDir, OPENCODE_PLUGIN_BUNDLE_FILENAME);
+  if (existsSync(legacyPath)) {
+    unlinkSync(legacyPath);
+    console.log(`  Removed legacy single-file install: ${legacyPath}`);
+  }
+}
+
 export function uninstallOpenCodePlugin(): number {
   let hasErrors = false;
 
@@ -400,6 +420,8 @@ export function uninstallOpenCodePlugin(): number {
   if (deregisterNpmPluginFromGlobalConfig() !== 0) {
     hasErrors = true;
   }
+
+  removeLegacySingleFileInstall();
 
   const agentsMdPath = getOpenCodeAgentsMdPath();
   if (existsSync(agentsMdPath)) {
