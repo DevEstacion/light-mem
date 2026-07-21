@@ -592,12 +592,35 @@ async function buildHooks() {
       // MARKETPLACE_ROOT/plugin/integrations/opencode/light-mem.js first; dist/ is
       // NOT synced, so without this copy a real install finds no bundle and the
       // plugin silently never lands (the plan-08 failure class).
+      //
+      // Emit TWO files:
+      //   - light-mem.bundle.js : full implementation (what the small entry requires)
+      //   - light-mem.js        : tiny re-export shim
+      //
+      // OpenCode's UI renders the plugin file as an "execution" annotation when a
+      // tool fires; a 50 KB minified blob in that panel is unreadable. Keeping
+      // light-mem.js ~700 bytes means the annotation is a one-liner.
       const opencodePluginDir = 'plugin/integrations/opencode';
       if (!fs.existsSync(opencodePluginDir)) {
         fs.mkdirSync(opencodePluginDir, { recursive: true });
       }
-      fs.copyFileSync(`${opencodeOutDir}/index.js`, `${opencodePluginDir}/light-mem.js`);
-      console.log(`✓ opencode plugin copied to ${opencodePluginDir}/light-mem.js`);
+      fs.copyFileSync(
+        `${opencodeOutDir}/index.js`,
+        `${opencodePluginDir}/light-mem.bundle.js`,
+      );
+      fs.writeFileSync(
+        `${opencodePluginDir}/light-mem.js`,
+        [
+          '// light-mem OpenCode plugin entry (shim).',
+          '// The full implementation lives in light-mem.bundle.js so OpenCode',
+          '// shows a small annotation instead of a 50 KB minified blob.',
+          'export { default, server } from "./light-mem.bundle.js";',
+          '',
+        ].join('\n'),
+      );
+      console.log(
+        `✓ opencode plugin copied to ${opencodePluginDir}/ (shim + bundle)`,
+      );
     }
 
     console.log(`\n🔧 Building NPX CLI...`);

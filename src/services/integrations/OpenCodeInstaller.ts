@@ -22,6 +22,14 @@ import { MARKETPLACE_ROOT } from '../../shared/paths.js';
 
 const OPENCODE_NPM_PACKAGE_NAME = 'light-mem';
 const OPENCODE_PLUGIN_BUNDLE_FILENAME = 'light-mem.js';
+const OPENCODE_PLUGIN_BUNDLE_SIBLING = 'light-mem.bundle.js';
+const OPENCODE_PLUGIN_SHIM_BODY = [
+  '// light-mem OpenCode plugin entry (shim).',
+  '// The full implementation lives in light-mem.bundle.js so OpenCode',
+  '// shows a small annotation instead of a 50 KB minified blob.',
+  'export { default, server } from "./light-mem.bundle.js";',
+  '',
+].join('\n');
 
 type OpenCodeConfig = {
   $schema?: string;
@@ -190,21 +198,39 @@ function copyPluginBundleTo(destinationDir: string): number {
     return 1;
   }
 
-  const destinationPath = path.join(destinationDir, OPENCODE_PLUGIN_BUNDLE_FILENAME);
-  copyFileSync(builtPluginPath, destinationPath);
-  console.log(`  Plugin bundle copied to: ${destinationPath}`);
-  logger.info('OPENCODE', 'Plugin bundle copied', { destination: destinationPath });
+  // Copy the heavy implementation as `light-mem.bundle.js` and write a tiny
+  // shim `light-mem.js` that re-exports from it. OpenCode renders the plugin
+  // file as a UI annotation; a 50 KB minified blob there is unreadable.
+  const bundleDestinationPath = path.join(
+    destinationDir,
+    OPENCODE_PLUGIN_BUNDLE_SIBLING,
+  );
+  const shimDestinationPath = path.join(
+    destinationDir,
+    OPENCODE_PLUGIN_BUNDLE_FILENAME,
+  );
+  copyFileSync(builtPluginPath, bundleDestinationPath);
+  writeFileSync(shimDestinationPath, OPENCODE_PLUGIN_SHIM_BODY);
+  console.log(`  Plugin bundle copied to: ${bundleDestinationPath}`);
+  console.log(`  Plugin shim written to:  ${shimDestinationPath}`);
+  logger.info('OPENCODE', 'Plugin bundle + shim copied', {
+    bundle: bundleDestinationPath,
+    shim: shimDestinationPath,
+  });
   return 0;
 }
 
 function findBuiltPluginPath(): string | null {
+  // The heavy implementation lives in `light-mem.bundle.js` next to the
+  // small `light-mem.js` shim. Look for the bundle, not the shim — copying
+  // the shim as the bundle would replace a 330 KB file with a 230 B file.
   const possiblePaths = [
     // Installed marketplace copy — plugin tree (build emits here)
-    path.join(MARKETPLACE_ROOT, 'plugin', 'integrations', 'opencode', OPENCODE_PLUGIN_BUNDLE_FILENAME),
+    path.join(MARKETPLACE_ROOT, 'plugin', 'integrations', 'opencode', OPENCODE_PLUGIN_BUNDLE_SIBLING),
     // Installed marketplace copy — legacy dist layout
     path.join(MARKETPLACE_ROOT, 'dist', 'opencode-plugin', 'index.js'),
     // Dev-tree checkout (repo root)
-    path.join(process.cwd(), 'plugin', 'integrations', 'opencode', OPENCODE_PLUGIN_BUNDLE_FILENAME),
+    path.join(process.cwd(), 'plugin', 'integrations', 'opencode', OPENCODE_PLUGIN_BUNDLE_SIBLING),
     path.join(process.cwd(), 'dist', 'opencode-plugin', 'index.js'),
     // Relative to this compiled file (fallback)
     path.join(
