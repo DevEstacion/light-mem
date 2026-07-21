@@ -103,16 +103,24 @@ function workerPostFireAndForget(
   body: Record<string, unknown>,
 ): void {
   const baseUrl = getWorkerBaseUrl();
+  // Swallow worker-unreachable errors silently. The worker starts lazily and
+  // OpenCode frequently fires tool.execute.after before the worker is up;
+  // warnings about that flood the console. We still log non-network errors.
   fetch(`${baseUrl}${path}`, {
     method: "POST",
     headers: JSON_HEADERS,
     body: JSON.stringify(body),
-  }).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes("ECONNREFUSED")) {
-      console.warn(`[light-mem] Worker POST ${path} failed: ${message}`);
-    }
-  });
+  })
+    .then((response) => {
+      if (!response.ok) {
+        console.warn(
+          `[light-mem] Worker POST ${path} returned ${response.status}`,
+        );
+      }
+    })
+    .catch(() => {
+      // Worker not reachable yet — expected during OpenCode cold start.
+    });
 }
 
 async function workerGetText(path: string): Promise<string | null> {
@@ -124,11 +132,8 @@ async function workerGetText(path: string): Promise<string | null> {
       return null;
     }
     return await response.text();
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes("ECONNREFUSED")) {
-      console.warn(`[light-mem] Worker GET ${path} failed: ${message}`);
-    }
+  } catch {
+    // Worker not reachable yet — expected during OpenCode cold start.
     return null;
   }
 }
