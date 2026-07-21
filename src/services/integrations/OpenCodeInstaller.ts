@@ -455,13 +455,12 @@ export function installOpenCodePlugin(): number {
     }
   }
 
-  // Register the MCP search server so OpenCode doesn't log
-  // `server unavailable key=light-mem:mcp-search` on every session start.
-  const mcpResult = registerMcpServerInGlobalConfig();
-  if (mcpResult !== 0) {
-    return mcpResult;
-  }
-
+  // No MCP server registration. The OpenCode plugin already exposes
+  // `light_mem_search` as a custom tool (`tool.execute.before/after` hooks
+  // + `tool: { light_mem_search: tool({...}) }`), which gives the assistant
+  // the search capability without an extra process. Registering an MCP
+  // server used to also trigger OpenCode's own
+  // `server unavailable key=light-mem:mcp-search` probe on every session.
   return 0;
 }
 
