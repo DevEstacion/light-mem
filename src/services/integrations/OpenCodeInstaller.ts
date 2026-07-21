@@ -22,7 +22,10 @@ import { MARKETPLACE_ROOT } from '../../shared/paths.js';
 
 const OPENCODE_NPM_PACKAGE_NAME = 'light-mem';
 const OPENCODE_PLUGIN_BUNDLE_FILENAME = 'light-mem.js';
-const OPENCODE_PLUGIN_BUNDLE_SIBLING = 'light-mem.bundle.js';
+// `.bundle.mjs` (not `.js`) so OpenCode's plugin auto-loader, which scans only
+// `.js` / `.ts`, does not pick it up as a second plugin entry. The shim
+// (light-mem.js) is the only file the loader sees.
+const OPENCODE_PLUGIN_BUNDLE_SIBLING = 'light-mem.bundle.mjs';
 const OPENCODE_PLUGIN_SHIM_BODY = [
   '// light-mem OpenCode plugin entry (shim).',
   '// The full implementation lives in light-mem.bundle.js so OpenCode',

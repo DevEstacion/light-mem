@@ -600,26 +600,30 @@ async function buildHooks() {
       // OpenCode's UI renders the plugin file as an "execution" annotation when a
       // tool fires; a 50 KB minified blob in that panel is unreadable. Keeping
       // light-mem.js ~700 bytes means the annotation is a one-liner.
+      //
+      // The bundle file uses a `.bundle.mjs` extension (not `.js`) so OpenCode's
+      // plugin auto-loader (which scans only `.js` / `.ts`) does NOT pick it up
+      // as a second plugin entry. The shim is the only file the loader sees.
       const opencodePluginDir = 'plugin/integrations/opencode';
       if (!fs.existsSync(opencodePluginDir)) {
         fs.mkdirSync(opencodePluginDir, { recursive: true });
       }
       fs.copyFileSync(
         `${opencodeOutDir}/index.js`,
-        `${opencodePluginDir}/light-mem.bundle.js`,
+        `${opencodePluginDir}/light-mem.bundle.mjs`,
       );
       fs.writeFileSync(
         `${opencodePluginDir}/light-mem.js`,
         [
           '// light-mem OpenCode plugin entry (shim).',
-          '// The full implementation lives in light-mem.bundle.js so OpenCode',
-          '// shows a small annotation instead of a 50 KB minified blob.',
-          'export { default, server } from "./light-mem.bundle.js";',
+          '// The full implementation lives in light-mem.bundle.mjs (non-.js',
+          '// extension so OpenCode does not auto-load it as a second plugin).',
+          'export { default, server } from "./light-mem.bundle.mjs";',
           '',
         ].join('\n'),
       );
       console.log(
-        `✓ opencode plugin copied to ${opencodePluginDir}/ (shim + bundle)`,
+        `✓ opencode plugin copied to ${opencodePluginDir}/ (shim + bundle.mjs)`,
       );
     }
 
