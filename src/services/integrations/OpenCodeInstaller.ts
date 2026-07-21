@@ -10,6 +10,8 @@ import {
   mkdirSync,
   copyFileSync,
   unlinkSync,
+  readdirSync,
+  rmSync,
 } from 'fs';
 import { logger } from '../../utils/logger.js';
 import {
@@ -236,6 +238,55 @@ export function removeOpenCodeNpmPluginReference(config: OpenCodeConfig): OpenCo
   };
 }
 
+/**
+ * Strip any stale `light-mem` (or `light-mem@…`) entry from the user's
+ * `opencode.json` / `opencode.jsonc` `plugin` array. The local shim at
+ * `~/.config/opencode/plugins/light-mem.js` is the single source of truth;
+ * the npm package is only used for `npx light-mem start` (the worker).
+ */
+function stripNpmPluginEntryFromGlobalConfig(): number {
+  const jsonPath = getOpenCodeGlobalConfigPath();
+  const jsoncPath = getOpenCodeGlobalOpencodeJsoncPath();
+  const targetPath = existsSync(jsoncPath) ? jsoncPath : jsonPath;
+  if (!existsSync(targetPath)) return 0;
+  try {
+    const config = readOpenCodeConfig(targetPath);
+    const plugins = asPluginList(config.plugin);
+    const filtered = plugins.filter(
+      (entry) => entry !== OPENCODE_NPM_PACKAGE_NAME && !entry.startsWith(`${OPENCODE_NPM_PACKAGE_NAME}@`),
+    );
+    if (filtered.length === plugins.length) return 0;
+    (config as { plugin?: unknown }).plugin = filtered;
+    writeOpenCodeConfig(targetPath, config);
+    console.log(`  Stripped npm plugin entry from: ${targetPath}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Failed to strip npm plugin entry: ${message}`);
+    return 1;
+  }
+
+  // Also wipe any stale light-mem packages from OpenCode's npm cache so
+  // OpenCode doesn't fall back to the old bundle from a previous install.
+  wipeStaleLightMemFromOpencodeCache();
+  return 0;
+}
+
+function wipeStaleLightMemFromOpencodeCache(): void {
+  const cacheDir = path.join(getOpenCodeGlobalConfigDirectory(), '..', 'cache', 'opencode', 'packages');
+  if (!existsSync(cacheDir)) return;
+  try {
+    for (const entry of readdirSync(cacheDir)) {
+      if (entry === OPENCODE_NPM_PACKAGE_NAME || entry.startsWith(`${OPENCODE_NPM_PACKAGE_NAME}@`)) {
+        rmSync(path.join(cacheDir, entry), { recursive: true, force: true });
+        console.log(`  Removed stale cached package: ${entry}`);
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`  Could not wipe stale cached packages: ${message}`);
+  }
+}
+
 function registerNpmPluginInGlobalConfig(): number {
   const jsonPath = getOpenCodeGlobalConfigPath();
   const jsoncPath = getOpenCodeGlobalOpencodeJsoncPath();
@@ -372,17 +423,19 @@ function tryNpmInstallGlobal(): boolean {
 }
 
 export function installOpenCodePlugin(): number {
-  // Layered install strategy:
-  //   1. Bundle file at ~/.config/opencode/plugins/light-mem.js
-  //      → OpenCode auto-loads local files in this directory (per docs).
-  //   2. npm-style entry ("light-mem") in ~/.config/opencode/opencode.json
-  //      → OpenCode also installs + loads the npm package as a redundant path.
-  //   3. If OPENCODE_CONFIG_DIR is set (e.g. ocx merge dir), mirror the bundle
-  //      file there so plugins/ stays non-empty after ocx regenerates the dir.
-  //      The npm config edit doesn't need mirroring — the global config is
-  //      merged with OPENCODE_CONFIG_CONTENT by OpenCode's config loader.
-
-  const npmOk = tryNpmInstallGlobal();
+  // Single source of truth: the local shim at ~/.config/opencode/plugins/.
+  //
+  // Earlier versions ALSO added a "light-mem" entry to opencode.json's
+  // `plugin` array, which made OpenCode install the npm package AND load
+  // the shim — two copies of the same plugin. Each tool run then fired
+  // BOTH, producing duplicate PostToolUse hooks in the UI. Keeping only
+  // the local shim means: one install path, one plugin entry, one
+  // observation per tool. The npm package is still useful for `npx
+  // light-mem start` (the worker) but is not loaded as an OpenCode plugin.
+  //
+  // If the user has a stale npm entry from a prior install, strip it so
+  // the next run only loads the shim.
+  stripNpmPluginEntryFromGlobalConfig();
 
   // Remove the legacy single-file install location. Pre-shim copies landed in
   // ~/.config/opencode/plugin/light-mem.js, and OpenCode auto-loads BOTH the
@@ -399,13 +452,6 @@ export function installOpenCodePlugin(): number {
     const configDirCopyResult = copyPluginBundleTo(configDirPlugins);
     if (configDirCopyResult !== 0) {
       return configDirCopyResult;
-    }
-  }
-
-  if (!npmOk) {
-    const registerResult = registerNpmPluginInGlobalConfig();
-    if (registerResult !== 0) {
-      return registerResult;
     }
   }
 
