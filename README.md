@@ -4,7 +4,7 @@
   </a>
 </p>
 
-<h4 align="center">Lightweight persistent memory for <a href="https://claude.com/claude-code" target="_blank">Claude Code</a> and <a href="https://opencode.ai" target="_blank">OpenCode</a>.</h4>
+<h4 align="center">Lightweight persistent memory for <a href="https://claude.com/claude-code" target="_blank">Claude Code</a>, Grok, Codex, and <a href="https://opencode.ai" target="_blank">OpenCode</a>.</h4>
 
 <p align="center">
   <a href="LICENSE">
@@ -29,7 +29,7 @@
 </p>
 
 <p align="center">
-  Light-Mem seamlessly preserves context across sessions by automatically capturing tool usage observations, generating semantic summaries, and making them available to future sessions. Works with <strong>Claude Code</strong> via lifecycle hooks and with <strong>OpenCode</strong> via a plugin installed into <code>~/.config/opencode/plugins</code> — both editors POST to the same shared worker.
+  Light-Mem seamlessly preserves context across sessions by automatically capturing tool usage observations, generating semantic summaries, and making them available to future sessions. Works with <strong>Claude Code</strong> and <strong>Grok</strong> via lifecycle hooks, <strong>Codex</strong> via <code>~/.codex/hooks.json</code>, and <strong>OpenCode</strong> via a plugin installed into <code>~/.config/opencode/plugins</code> — every host POSTs to the same shared worker.
 </p>
 
 ---
@@ -57,7 +57,7 @@ Restart Claude Code. Context from previous sessions will automatically appear in
 **Key Features:**
 
 - 🧠 **Persistent Memory** - Context survives across sessions
-- 🖥️ **Claude Code + OpenCode** - Works with both editors; OpenCode support resurrected in this release
+- 🖥️ **Claude Code, Grok, Codex, OpenCode** - Works across all four hosts via a shared worker
 - 📊 **Progressive Disclosure** - Layered memory retrieval with token cost visibility
 - 🔍 **Skill-Based Search** - Query your project history with mem-search skill
 - 🌐 **Web Viewer UI** - Real-time memory stream on the worker port (run `npx light-mem status` to see the URL)

@@ -433,7 +433,8 @@ describe('Spawn-Contract Templating - Rule A node launcher resolution matrix', (
 
 describe('Spawn-Contract Templating - Rule B installers bake absolute paths', () => {
   const installerFiles = [
-    'src/services/integrations/McpIntegrations.ts',
+    'src/services/integrations/CodexInstaller.ts',
+    'src/services/integrations/OpenCodeInstaller.ts',
   ];
 
   for (const file of installerFiles) {

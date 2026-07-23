@@ -1,13 +1,15 @@
 # Architecture
 
 <!-- START:OVERVIEW -->
-light-mem gives Claude Code and OpenCode persistent memory across sessions.
+light-mem gives Claude Code, Grok, Codex, and OpenCode persistent memory across sessions.
 
 Six lifecycle hooks (declared in `plugin/hooks/hooks.json`) fire during a Claude Code
 session. Each hook launches `plugin/scripts/node-runner.js` — a small ES-module launcher
 that locates a Node ≥24 and re-spawns the bundled worker (`worker-service.cjs`) under it.
-OpenCode is supported via a plugin (`src/integrations/opencode-plugin`) installed into
-`~/.config/opencode/plugins` that POSTs session events to the same worker HTTP endpoints.
+Grok loads the same Claude plugin hooks (camelCase stdin is normalized by the shared
+adapter); Codex runs them via `~/.codex/hooks.json`. OpenCode is supported via a plugin
+(`src/integrations/opencode-plugin`) installed into `~/.config/opencode/plugins` that
+POSTs session events to the same worker HTTP endpoints.
 The worker is a long-running HTTP daemon that owns the SQLite database and an MCP search server.
 
 The data loop is **capture → compress → embed → store → recall**:

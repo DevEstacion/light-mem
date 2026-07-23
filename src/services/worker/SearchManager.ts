@@ -136,7 +136,7 @@ export class SearchManager {
     }
 
     // Source-scoping (#2389): normalize the platform_source filter so that a
-    // codex/cursor/etc. agent only sees its own memory. Accept both the
+    // grok/codex/etc. agent only sees its own memory. Accept both the
     // camelCase API param and the snake_case column name for robustness.
     const rawPlatformSource = normalized.platformSource ?? normalized.platform_source;
     if (typeof rawPlatformSource === 'string' && rawPlatformSource.trim()) {

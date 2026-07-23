@@ -1,7 +1,8 @@
 # light-mem
 
-Lightweight persistent memory system for **Claude Code** and **OpenCode**. It captures
-tool-usage observations via lifecycle hooks (Claude Code) or an OpenCode plugin, compresses
+Lightweight persistent memory system for **Claude Code**, **Grok**, **Codex**, and
+**OpenCode**. It captures tool-usage observations via lifecycle hooks (Claude Code, Grok,
+Codex) or an OpenCode plugin, compresses
 them into searchable summaries with the Claude Agent SDK (default) or a direct
 Messages API call, embeds them in-process (potion-base-8M + BM25 hybrid search), and
 injects relevant context into future sessions. TypeScript, Node ≥24, esbuild-bundled

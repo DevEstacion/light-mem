@@ -10,8 +10,8 @@ export const AgentEventSchema = z.object({
   serverSessionId: z.string().min(1).nullable().default(null),
   sourceType: AgentEventSourceTypeSchema,
   eventType: z.string().min(1),
-  // #2560 — which platform produced the event (claude-code, opencode, cursor,
-  // ...). Persisted on the Postgres agent_events row for plan-09 scoping; the
+  // #2560 — which platform produced the event (claude, grok, codex,
+  // opencode). Persisted on the Postgres agent_events row for plan-09 scoping; the
   // SQLite repo ignores it. Optional and nullable so existing clients are
   // unaffected.
   platformSource: z.string().min(1).nullable().default(null),

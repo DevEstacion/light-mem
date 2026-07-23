@@ -57,8 +57,7 @@ ${pc.bold('Runtime Commands')} (requires Node ≥24, delegates to installed plug
   ${pc.cyan('npx light-mem transcript watch')}     Start transcript watcher
 
 ${pc.bold('IDE Identifiers')}:
-  claude-code, copilot-cli, antigravity, goose,
-  roo-code, warp
+  claude-code, grok, codex, opencode
 `);
 }
 

@@ -2,18 +2,6 @@ import { readFileSync, existsSync } from 'fs';
 import { logger } from '../utils/logger.js';
 import { SYSTEM_REMINDER_REGEX } from '../utils/tag-stripping.js';
 
-function isGeminiTranscriptFormat(content: string): { isGemini: true; messages: any[] } | { isGemini: false } {
-  try {
-    const parsed = JSON.parse(content);
-    if (parsed && Array.isArray(parsed.messages)) {
-      return { isGemini: true, messages: parsed.messages };
-    }
-  } catch {
-    // Not a valid single JSON object — assume JSONL
-  }
-  return { isGemini: false };
-}
-
 export function extractLastMessage(
   transcriptPath: string,
   role: 'user' | 'assistant',
@@ -30,48 +18,17 @@ export function extractLastMessage(
     return '';
   }
 
-  const geminiCheck = isGeminiTranscriptFormat(content);
-  if (geminiCheck.isGemini) {
-    return extractLastMessageFromGeminiTranscript(geminiCheck.messages, role, stripSystemReminders);
-  }
-
   return extractLastMessageFromJsonl(content, role, stripSystemReminders);
-}
-
-function extractLastMessageFromGeminiTranscript(
-  messages: any[],
-  role: 'user' | 'assistant',
-  stripSystemReminders: boolean
-): string {
-  const geminiRole = role === 'assistant' ? 'gemini' : 'user';
-
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg?.type === geminiRole && typeof msg.content === 'string') {
-      let text = msg.content;
-      if (stripSystemReminders) {
-        text = text.replace(SYSTEM_REMINDER_REGEX, '');
-        text = text.replace(/\n{3,}/g, '\n\n').trim();
-      }
-      return text;
-    }
-  }
-
-  return '';
 }
 
 /**
  * Extract last message from a JSONL transcript.
  *
- * Supports two field conventions for the per-line role marker:
- * - Claude Code:  `{"type":"assistant",...}`
- * - Cursor:       `{"role":"assistant",...}`
- *
- * The most recent assistant turn is often a pure tool_use block with no text
- * content (especially in Cursor, where the agent's last action before the
- * user replies is a tool call). We therefore keep scanning backwards until
- * we find a turn with non-empty text content, instead of returning early on
- * the first matching role.
+ * All supported platforms (Claude Code, Grok, Codex, OpenCode) write
+ * `{"type":"assistant",...}` JSONL. The most recent assistant turn is often a
+ * pure tool_use block with no text content, so we keep scanning backwards
+ * until we find a turn with non-empty text content, instead of returning early
+ * on the first matching role.
  */
 export function extractLastMessageFromJsonl(
   content: string,
@@ -93,8 +50,7 @@ export function extractLastMessageFromJsonl(
     } catch {
       continue;
     }
-    const lineRole = line.type ?? line.role;
-    if (lineRole !== role) continue;
+    if (line.type !== role) continue;
     foundMatchingRole = true;
 
     if (!line.message?.content) continue;

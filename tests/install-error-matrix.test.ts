@@ -22,17 +22,9 @@ import {
 
 const CANONICAL_IDES = [
   'claude-code',
-  'gemini-cli',
+  'grok',
+  'codex',
   'opencode',
-  'openclaw',
-  'windsurf',
-  'codex-cli',
-  'cursor',
-  'copilot-cli',
-  'antigravity',
-  'goose',
-  'roo-code',
-  'warp',
 ];
 
 describe('error taxonomy', () => {
@@ -139,13 +131,13 @@ describe('installerError decision logic', () => {
   it('FAIL_LOUD_PER_IDE records the IDE and a warning, no throw', () => {
     const summary = createInstallSummary();
     installerError(ErrorSeverity.FAIL_LOUD_PER_IDE, {
-      component: 'Cursor: hook installation failed',
-      ide: 'cursor',
+      component: 'Codex CLI: hooks install failed',
+      ide: 'codex',
       phase: 'ide-install',
-      cause: new Error('Cursor: hook installation failed'),
+      cause: new Error('Codex CLI: hooks install failed'),
       details: 'EACCES: permission denied',
     }, summary);
-    expect(summary.failedIDEs).toEqual(['cursor']);
+    expect(summary.failedIDEs).toEqual(['codex']);
     expect(summary.warnings[0].message).toContain('EACCES');
   });
 
@@ -259,7 +251,7 @@ function simulateInstall(_ide: string, scenario: Scenario): Outcome {
   return { status, aborted: false };
 }
 
-describe('cross-IDE failure matrix (12 IDEs x 4 scenarios)', () => {
+describe('cross-IDE failure matrix (4 IDEs x 3 scenarios)', () => {
   const scenarios: Scenario[] = ['happy', 'eresolve', 'old-node'];
 
   let prevMatrixDataDir: string | undefined;
@@ -278,8 +270,8 @@ describe('cross-IDE failure matrix (12 IDEs x 4 scenarios)', () => {
     else process.env.LIGHT_MEM_DATA_DIR = prevMatrixDataDir;
   });
 
-  it('produces 36 cells (12 IDEs x 3 scenarios)', () => {
-    expect(CANONICAL_IDES.length * scenarios.length).toBe(36);
+  it('produces 12 cells (4 IDEs x 3 scenarios)', () => {
+    expect(CANONICAL_IDES.length * scenarios.length).toBe(12);
   });
 
   for (const ide of CANONICAL_IDES) {

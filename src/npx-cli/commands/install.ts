@@ -25,6 +25,7 @@ import {
 } from '../install/error-reporter.js';
 import { extractEresolveBlock, isEresolve, runNpmStrict } from '../install/npm-install-helper.js';
 import { resolveBedrockModel } from '../install/bedrock-models.js';
+import { PLATFORM_INSTALLERS } from '../../services/integrations/platform-installers.js';
 
 function getSetting<K extends keyof SettingsDefaults>(key: K): SettingsDefaults[K] {
   return SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH)[key];
@@ -243,105 +244,24 @@ function makeIDETask(ideId: string, summary: InstallSummary): TaskDescriptor | n
     }, summary);
   };
 
-  switch (ideId) {
-    case 'claude-code': {
-      return {
-        title: 'Claude Code: registering plugin',
-        task: async () => `Claude Code: plugin registered ${pc.green('OK')}`,
-      };
-    }
+  const installer = PLATFORM_INSTALLERS[ideId];
+  if (!installer) return null;
 
-    case 'opencode': {
-      const allIDEs = detectInstalledIDEs();
-      const ideInfo = allIDEs.find((i) => i.id === ideId);
-      const ideLabel = ideInfo?.label ?? 'OpenCode';
-      return {
-        title: `${ideLabel}: installing plugin integration`,
-        task: async (message) => {
-          message('Loading OpenCode installer…');
-          const { installOpenCodeIntegration } = await import('../../services/integrations/OpenCodeInstaller.js');
-          message('Installing OpenCode plugin…');
-          const { result, output } = await bufferConsole(() => installOpenCodeIntegration());
-          if (result !== 0) {
-            recordFailure(`${ideLabel}: plugin integration failed`, output);
-            return `${ideLabel}: plugin integration failed ${pc.red('FAIL')}`;
-          }
-          return `${ideLabel}: plugin integration installed ${pc.green('OK')}`;
-        },
-      };
-    }
-
-    case 'codex': {
-      const allIDEs = detectInstalledIDEs();
-      const ideInfo = allIDEs.find((i) => i.id === ideId);
-      const ideLabel = ideInfo?.label ?? 'Codex CLI';
-      return {
-        title: `${ideLabel}: installing hooks`,
-        task: async (message) => {
-          message('Loading Codex installer…');
-          const { installCodexIntegration } = await import('../../services/integrations/CodexInstaller.js');
-          message('Installing Codex hooks into ~/.codex/hooks.json…');
-          const { result, output } = await bufferConsole(async () => installCodexIntegration());
-          if (result !== 0) {
-            recordFailure(`${ideLabel}: hooks install failed`, output);
-            return `${ideLabel}: hooks install failed ${pc.red('FAIL')}`;
-          }
-          return `${ideLabel}: hooks installed ${pc.green('OK')}`;
-        },
-      };
-    }
-
-    case 'grok': {
-      // Grok Build loads Claude Code plugins (including light-mem hooks.json)
-      // with camelCase stdin; no separate installer — registering the Claude
-      // plugin is sufficient. Surface a clear OK so install --ide grok works.
-      return {
-        title: 'Grok Build: Claude plugin hooks',
-        task: async () =>
-          `Grok Build: uses Claude plugin hooks ${pc.green('OK')} ${pc.dim('(trust folder + /hooks reload)')}`,
-      };
-    }
-
-    case 'copilot-cli':
-    case 'antigravity':
-    case 'goose':
-    case 'roo-code':
-    case 'warp': {
-      const allIDEs = detectInstalledIDEs();
-      const ideInfo = allIDEs.find((i) => i.id === ideId);
-      const ideLabel = ideInfo?.label ?? ideId;
-      return {
-        title: `${ideLabel}: installing MCP integration`,
-        task: async (message) => {
-          message('Loading MCP installer…');
-          const { MCP_IDE_INSTALLERS } = await import('../../services/integrations/McpIntegrations.js');
-          const mcpInstaller = MCP_IDE_INSTALLERS[ideId];
-          if (!mcpInstaller) {
-            return `${ideLabel}: MCP installer not found ${pc.yellow('!')}`;
-          }
-          message(`Configuring ${ideLabel} MCP…`);
-          const { result, output } = await bufferConsole(() => mcpInstaller());
-          if (result !== 0) {
-            recordFailure(`${ideLabel}: MCP integration failed`, output);
-            return `${ideLabel}: MCP integration failed ${pc.red('FAIL')}`;
-          }
-          return `${ideLabel}: MCP integration installed ${pc.green('OK')}`;
-        },
-      };
-    }
-
-    default: {
-      const allIDEs = detectInstalledIDEs();
-      const ide = allIDEs.find((i) => i.id === ideId);
-      if (ide && !ide.supported) {
-        return {
-          title: `${ide.label}: skipping`,
-          task: async () => `${ide.label}: support coming soon ${pc.yellow('!')}`,
-        };
+  return {
+    title: installer.title,
+    task: async (message) => {
+      // No-op piggyback installers (claude-code, grok) have no failureMessage
+      // and never shell out — skip the console buffer for them.
+      const { result, output } = await bufferConsole(() => installer.run(message));
+      if (!result.ok) {
+        const failure = installer.failureMessage ?? `${installer.successMessage} failed`;
+        recordFailure(failure, output);
+        return `${failure} ${pc.red('FAIL')}`;
       }
-      return null;
-    }
-  }
+      const hint = installer.successHint ? ` ${pc.dim(installer.successHint)}` : '';
+      return `${installer.successMessage} ${pc.green('OK')}${hint}`;
+    },
+  };
 }
 
 async function setupIDEs(selectedIDEs: string[], summary: InstallSummary): Promise<string[]> {

@@ -23,7 +23,6 @@ export type Component =
   | 'CODEX'
   | 'CONFIG'
   | 'CONSOLE'
-  | 'CURSOR'
   | 'DB'
   | 'DEDUP'
   | 'ENV'
@@ -35,7 +34,6 @@ export type Component =
   | 'INGEST'
   | 'LOCAL_VECTOR'
   | 'OAUTH'
-  | 'OPENCLAW'
   | 'OPENCODE'
   | 'PARSER'
   | 'PROCESS'
@@ -50,7 +48,6 @@ export type Component =
   | 'SHUTDOWN'
   | 'SYSTEM'
   | 'TRANSCRIPT'
-  | 'WINDSURF'
   | 'WORKER';
 
 interface LogContext {

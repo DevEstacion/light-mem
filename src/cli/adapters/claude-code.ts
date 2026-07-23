@@ -6,7 +6,7 @@ const pickAgentField = (v: unknown): string | undefined =>
   typeof v === 'string' && v.length > 0 && v.length <= MAX_AGENT_FIELD_LEN ? v : undefined;
 
 /**
- * Normalize Claude Code + Codex CLI + Grok Build (+ Cursor-compat) hook envelopes.
+ * Normalize Claude Code + Codex CLI + Grok Build hook envelopes.
  *
  * - Claude Code / Codex: snake_case (`tool_name`, `tool_input`, `tool_response`,
  *   `stop_hook_active`, `last_assistant_message`) — see learn.chatgpt.com/docs/hooks
@@ -26,7 +26,7 @@ export const claudeCodeAdapter: PlatformAdapter = {
       sessionId: r.session_id ?? r.id ?? r.sessionId,
       cwd,
       prompt: r.prompt,
-      // Claude/Codex snake_case first, then Grok/Cursor camelCase.
+      // Claude/Codex snake_case first, then Grok camelCase.
       toolName: r.tool_name ?? r.toolName,
       toolInput: r.tool_input ?? r.toolInput,
       // Grok PostToolUse uses `toolResult`; Claude/Codex use `tool_response`.
