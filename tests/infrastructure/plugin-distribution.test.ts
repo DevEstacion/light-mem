@@ -108,6 +108,16 @@ describe('Plugin Distribution - hooks.json Integrity', () => {
 });
 
 describe('Plugin Distribution - Startup Root Resolution', () => {
+  it('MCP launcher code must not contain shell PATH bootstrap', () => {
+    const mcp = readJson('plugin/.mcp.json');
+    const args = mcp.mcpServers['mcp-search'].args as string[];
+
+    expect(args[0]).toBe('-e');
+    expect(args[1]).not.toContain('export PATH=');
+    expect(args[1]).not.toContain('$SHELL');
+    expect(args[1]).not.toContain('$PATH');
+  });
+
   it('MCP startup command resolves the plugin root cross-platform (#2792)', () => {
     // The launcher is now a cross-platform `node -e` payload (no `sh`), so it
     // spawns on Windows without Git Bash. It must still resolve the plugin root
