@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { spawnSync } from 'child_process';
+import { Script } from 'node:vm';
 import path from 'path';
 import { buildShellCommand } from '../../src/build/hook-shell-template.js';
 
@@ -113,7 +114,7 @@ describe('Plugin Distribution - Startup Root Resolution', () => {
     const args = mcp.mcpServers['mcp-search'].args as string[];
 
     expect(args[0]).toBe('-e');
-    expect(() => new Function(args[1])).not.toThrow();
+    expect(() => new Script(args[1])).not.toThrow();
     expect(args[1]).not.toContain('export PATH=');
     expect(args[1]).not.toContain('$SHELL');
     expect(args[1]).not.toContain('$PATH');
