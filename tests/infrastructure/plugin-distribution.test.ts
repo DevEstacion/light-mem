@@ -113,7 +113,7 @@ describe('Plugin Distribution - Startup Root Resolution', () => {
     const args = mcp.mcpServers['mcp-search'].args as string[];
 
     expect(args[0]).toBe('-e');
-    expect(args[1].trimStart()).toMatch(/^\(/);
+    expect(() => new Function(args[1])).not.toThrow();
     expect(args[1]).not.toContain('export PATH=');
     expect(args[1]).not.toContain('$SHELL');
     expect(args[1]).not.toContain('$PATH');
