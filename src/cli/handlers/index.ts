@@ -5,16 +5,18 @@ import { logger } from '../../utils/logger.js';
 import { contextHandler } from './context.js';
 import { sessionInitHandler } from './session-init.js';
 import { observationHandler } from './observation.js';
+import { observationBatchHandler } from './observation-batch.js';
 import { summarizeHandler } from './summarize.js';
 import { userMessageHandler } from './user-message.js';
 import { fileEditHandler } from './file-edit.js';
 import { fileContextHandler } from './file-context.js';
 
 export type EventType =
-  | 'context'           
-  | 'session-init'      
-  | 'observation'       
-  | 'summarize'         
+  | 'context'
+  | 'session-init'
+  | 'observation'
+  | 'observation-batch'
+  | 'summarize'
   | 'user-message'      
   | 'file-edit'         
   | 'file-context';     
@@ -23,6 +25,7 @@ const handlers: Record<EventType, EventHandler> = {
   'context': contextHandler,
   'session-init': sessionInitHandler,
   'observation': observationHandler,
+  'observation-batch': observationBatchHandler,
   'summarize': summarizeHandler,
   'user-message': userMessageHandler,
   'file-edit': fileEditHandler,
@@ -45,6 +48,7 @@ export function getEventHandler(eventType: string): EventHandler {
 export { contextHandler } from './context.js';
 export { sessionInitHandler } from './session-init.js';
 export { observationHandler } from './observation.js';
+export { observationBatchHandler } from './observation-batch.js';
 export { summarizeHandler } from './summarize.js';
 export { userMessageHandler } from './user-message.js';
 export { fileEditHandler } from './file-edit.js';

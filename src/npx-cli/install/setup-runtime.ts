@@ -262,9 +262,9 @@ export async function fetchTreeSitterCliBinary(targetDir: string): Promise<void>
         error ? reject(Object.assign(error, { stdout, stderr })) : resolve());
     });
   } catch (error) {
-    // Non-fatal: smart-explore degrades, the worker is unaffected.
+    // Non-fatal: code search (smart-search mode=code) degrades, the worker is unaffected.
     console.warn(
-      `light-mem: tree-sitter CLI binary download failed; the smart-explore skill ` +
+      `light-mem: tree-sitter CLI binary download failed; code search (the smart-search skill's code mode) ` +
       `will be unavailable until it succeeds (the core memory worker is unaffected). ` +
       `Re-run \`npx light-mem install\` to retry.\n${describeExecError(error)}`,
     );

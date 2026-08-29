@@ -29,9 +29,9 @@ function mcpStartupCommandFrom(relativePath: string): string {
 }
 
 describe('Plugin Distribution - Skills', () => {
-  const skillPath = path.join(projectRoot, 'plugin/skills/mem-search/SKILL.md');
+  const skillPath = path.join(projectRoot, 'plugin/skills/smart-search/SKILL.md');
 
-  it('should include plugin/skills/mem-search/SKILL.md', () => {
+  it('should include plugin/skills/smart-search/SKILL.md', () => {
     expect(existsSync(skillPath)).toBe(true);
   });
 
@@ -61,7 +61,7 @@ describe('Plugin Distribution - Required Files', () => {
     'plugin/hooks/hooks.json',
     'plugin/.claude-plugin/plugin.json',
     'plugin/.mcp.json',
-    'plugin/skills/mem-search/SKILL.md',
+    'plugin/skills/smart-search/SKILL.md',
     '.agents/plugins/marketplace.json',
   ];
 
@@ -172,7 +172,7 @@ describe('Plugin Distribution - Build Script Verification', () => {
     const buildScriptPath = path.join(projectRoot, 'scripts/build-hooks.js');
     const content = readFileSync(buildScriptPath, 'utf-8');
 
-    expect(content).toContain('plugin/skills/mem-search/SKILL.md');
+    expect(content).toContain('plugin/skills/smart-search/SKILL.md');
     expect(content).toContain('plugin/hooks/hooks.json');
     expect(content).toContain('plugin/.claude-plugin/plugin.json');
   });
@@ -291,7 +291,7 @@ const RULE_A_EXPECTATIONS: Record<string, Record<string, string>> = {
       background: true,
     }),
     'UserPromptSubmit.0.0': claudeHook(['hook', 'claude-code', 'session-init']),
-    'PostToolUse.0.0': claudeHook(['hook', 'claude-code', 'observation']),
+    'PostToolBatch.0.0': claudeHook(['hook', 'claude-code', 'observation-batch']),
     'PreToolUse.0.0': claudeHook(['hook', 'claude-code', 'file-context']),
     'Stop.0.0': claudeHook(['hook', 'claude-code', 'summarize']),
   },
@@ -324,6 +324,28 @@ describe('Spawn-Contract Templating - Rule A generator parity', () => {
   it('plugin/.mcp.json mcp-search command equals buildShellCommand output', () => {
     const parsed = readJson('plugin/.mcp.json');
     expect(parsed.mcpServers['mcp-search'].args[1]).toBe(MCP_EXPECTED);
+  });
+
+  // Matcher is part of the Rule A canonical contract (see scripts/build-hooks.js
+  // matchers map). Assert it here so `npm test` — not only `npm run build` —
+  // catches matcher drift (e.g. narrowing PreToolUse back off Edit/Write).
+  const MATCHER_EXPECTATIONS: Record<string, string> = {
+    'SessionStart.0': 'startup|clear|compact',
+    'PreToolUse.0': 'Read|read_file|Edit|Write',
+  };
+  for (const [dottedPath, expected] of Object.entries(MATCHER_EXPECTATIONS)) {
+    it(`plugin/hooks/hooks.json [${dottedPath}] matcher equals ${expected}`, () => {
+      const parsed = readJson('plugin/hooks/hooks.json');
+      const [event, groupIdx] = dottedPath.split('.');
+      const actual = parsed.hooks?.[event]?.[Number(groupIdx)]?.matcher ?? null;
+      expect(actual).toBe(expected);
+    });
+  }
+
+  it('plugin/hooks/grok-hooks.json PostToolUse command equals the generator observation launcher', () => {
+    const parsed = readJson('plugin/hooks/grok-hooks.json');
+    const actual = parsed.hooks?.PostToolUse?.[0]?.hooks?.[0]?.command ?? null;
+    expect(actual).toBe(claudeHook(['hook', 'claude-code', 'observation']));
   });
 
   it('never leaks shell ${CLAUDE_PLUGIN_ROOT} tokens into hook commands', () => {

@@ -115,6 +115,10 @@ export function runCleanupCommand(extraArgs: string[] = []): void {
   spawnNodeWorkerCommand('cleanup', extraArgs);
 }
 
+export function runCompactCommand(extraArgs: string[] = []): void {
+  spawnNodeWorkerCommand('compact', extraArgs);
+}
+
 export async function runSearchCommand(queryParts: string[]): Promise<void> {
   ensureInstalledOrExit();
 

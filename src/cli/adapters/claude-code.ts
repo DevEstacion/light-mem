@@ -14,6 +14,9 @@ const pickAgentField = (v: unknown): string | undefined =>
  * - Grok Build: loads Claude plugins but feeds camelCase stdin
  *   (`toolName`, `toolInput`, `toolResult`) per docs.x.ai/build/features/hooks.
  *   Without dual-key reads, PostToolUse observations silently no-op under Grok.
+ * - Claude Code PostToolBatch: a single event carrying `tool_calls[]` (each with
+ *   `tool_name`/`tool_input`/`tool_response`/`tool_use_id`). Mapped to `toolCalls`
+ *   for the observation-batch handler. Grok/Codex have no such event.
  */
 export const claudeCodeAdapter: PlatformAdapter = {
   normalizeInput(raw) {
@@ -22,7 +25,16 @@ export const claudeCodeAdapter: PlatformAdapter = {
     if (!isValidCwd(cwd)) {
       throw new AdapterRejectedInput('invalid_cwd');
     }
+    const toolCalls = Array.isArray(r.tool_calls)
+      ? r.tool_calls.map((tc: any) => ({
+          toolName: tc?.tool_name ?? tc?.toolName,
+          toolInput: tc?.tool_input ?? tc?.toolInput,
+          toolResponse: tc?.tool_response ?? tc?.toolResponse ?? tc?.tool_result ?? tc?.toolResult,
+          toolUseId: tc?.tool_use_id ?? tc?.toolUseId,
+        }))
+      : undefined;
     return {
+      toolCalls,
       sessionId: r.session_id ?? r.id ?? r.sessionId,
       cwd,
       prompt: r.prompt,

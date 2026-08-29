@@ -118,8 +118,8 @@ function formatFileTimeline(
   const lines: string[] = [
     `Current: ${currentDate} ${currentTime} ${currentTimezone}`,
     `This file has prior observations — supplementary context follows. The Read result below is the full requested section.`,
-    `- **Need details on a past observation?** get_observations([IDs]) — ~300 tokens each.`,
-    `- **Need a structural map first?** smart_outline("${safePath}") — line numbers only, cheaper than re-reading.`,
+    `- **Need details on a past observation?** search(mode="fetch", ids=[IDs]) — ~300 tokens each.`,
+    `- **Need a structural map first?** code(mode="outline", file_path="${safePath}") — line numbers only, cheaper than re-reading.`,
   ];
 
   for (const [day, dayObservations] of sortedDays) {

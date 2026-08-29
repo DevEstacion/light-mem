@@ -49,6 +49,9 @@ export interface SettingsDefaults {
   LIGHT_MEM_QUEUE_ENGINE: string;
   LIGHT_MEM_AUTH_MODE: string;
   LIGHT_MEM_RUNTIME: string;
+  LIGHT_MEM_COMPACT_AGE_DAYS: string;
+  LIGHT_MEM_COMPACT_NEAR_DUP_THRESHOLD: string;
+  LIGHT_MEM_COMPACT_LOW_SIGNAL_MIN_AGE_DAYS: string;
 }
 
 export class SettingsDefaultsManager {
@@ -97,6 +100,9 @@ export class SettingsDefaultsManager {
     LIGHT_MEM_QUEUE_ENGINE: 'sqlite',
     LIGHT_MEM_AUTH_MODE: 'api-key',
     LIGHT_MEM_RUNTIME: 'worker',
+    LIGHT_MEM_COMPACT_AGE_DAYS: '180',
+    LIGHT_MEM_COMPACT_NEAR_DUP_THRESHOLD: '0.93',
+    LIGHT_MEM_COMPACT_LOW_SIGNAL_MIN_AGE_DAYS: '30',
   };
 
   static getAllDefaults(): SettingsDefaults {

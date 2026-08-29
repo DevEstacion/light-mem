@@ -5,8 +5,8 @@ import { join } from 'path';
 const SKILLS_DIR = join(import.meta.dirname, '../../plugin/skills');
 
 describe('skill docs placement (#1651)', () => {
-  it('smart-explore/SKILL.md contains Language Support section', () => {
-    const path = join(SKILLS_DIR, 'smart-explore/SKILL.md');
+  it('smart-search/SKILL.md contains Language Support section', () => {
+    const path = join(SKILLS_DIR, 'smart-search/SKILL.md');
     expect(existsSync(path)).toBe(true);
     const content = readFileSync(path, 'utf-8');
 
@@ -14,8 +14,8 @@ describe('skill docs placement (#1651)', () => {
     expect(content).toContain('tree-sitter');
   });
 
-  it('smart-explore/SKILL.md lists bundled languages', () => {
-    const content = readFileSync(join(SKILLS_DIR, 'smart-explore/SKILL.md'), 'utf-8');
+  it('smart-search/SKILL.md lists bundled languages', () => {
+    const content = readFileSync(join(SKILLS_DIR, 'smart-search/SKILL.md'), 'utf-8');
 
     const expectedLanguages = [
       'JavaScript',
@@ -35,14 +35,5 @@ describe('skill docs placement (#1651)', () => {
     }
 
     expect(content).toContain('Files with unrecognized extensions are parsed as plain text');
-  });
-
-  it('mem-search/SKILL.md does NOT contain tree-sitter or language grammar docs', () => {
-    const path = join(SKILLS_DIR, 'mem-search/SKILL.md');
-    expect(existsSync(path)).toBe(true);
-    const content = readFileSync(path, 'utf-8');
-
-    expect(content).not.toContain('tree-sitter');
-    expect(content).not.toContain('Bundled Languages');
   });
 });

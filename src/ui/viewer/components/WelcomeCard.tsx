@@ -155,7 +155,7 @@ const FEATURES: Feature[] = [
     kind: 'recall',
     illustration: <RecallIllustration />,
     title: 'Recall it',
-    description: 'Ask Claude or run /mem-search to find past work.',
+    description: 'Ask Claude or run /smart-search to find past work.',
   },
 ];
 

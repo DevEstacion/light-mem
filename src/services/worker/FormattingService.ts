@@ -11,7 +11,7 @@ export class FormattingService {
 💡 Search Strategy:
 1. Search with index to see titles, dates, IDs
 2. Use timeline to get context around interesting results
-3. Batch fetch full details: get_observations(ids=[...])
+3. Batch fetch full details: search(mode="fetch", ids=[...])
 
 Tips:
 • Filter by type: obs_type="bugfix,feature"

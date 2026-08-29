@@ -19,7 +19,7 @@ describe('Hook Lifecycle - Event Handlers', () => {
     it('should return handler for all recognized event types', async () => {
       const { getEventHandler } = await import('../src/cli/handlers/index.js');
       const recognizedTypes = [
-        'context', 'session-init', 'observation',
+        'context', 'session-init', 'observation', 'observation-batch',
         'summarize', 'user-message', 'file-edit', 'file-context'
       ];
       for (const type of recognizedTypes) {

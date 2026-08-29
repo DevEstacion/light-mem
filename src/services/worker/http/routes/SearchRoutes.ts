@@ -11,6 +11,7 @@ import { groupByDate } from '../../../../shared/timeline-formatting.js';
 import { countObservationsByProjects } from '../../../context/ObservationCompiler.js';
 import { SettingsDefaultsManager } from '../../../../shared/SettingsDefaultsManager.js';
 import { USER_SETTINGS_PATH } from '../../../../shared/paths.js';
+import { recordObservationFeedback } from '../../../sqlite/feedback.js';
 import type { ObservationSearchResult, SessionSummarySearchResult } from '../../../sqlite/types.js';
 
 const ONBOARDING_EXPLAINER_PATH: string = path.resolve(__dirname, '../skills/how-it-works/onboarding-explainer.md');
@@ -45,7 +46,7 @@ This project has no memory yet. The current session will seed it; subsequent ses
 
 Memory injection starts on your second session in a project.
 
-\`/learn-codebase\` is available if the user wants to front-load the entire repo into memory in a single pass (~5 minutes on a typical repo, optional). Otherwise memory builds passively as work happens.
+Memory builds passively as work happens.
 
 Live activity: {viewer_url}
 How it works: \`/how-it-works\`
@@ -384,7 +385,8 @@ export class SearchRoutes extends BaseRouteHandler {
         projects: projects,
         full
       },
-      forHuman
+      forHuman,
+      true // real injection — record an injection signal for compaction's low-signal pruning
     );
 
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -418,6 +420,14 @@ export class SearchRoutes extends BaseRouteHandler {
       res.json({ context: '', count: 0 });
       return;
     }
+
+    // These observations are spliced into the agent's PostToolUse context, i.e.
+    // actually surfaced — record a retrieval signal (best-effort, never throws).
+    recordObservationFeedback(
+      this.searchManager.getSessionStore().db,
+      observations.slice(0, limit).map((o: any) => o.id).filter((id: any): id is number => typeof id === 'number'),
+      'retrieval'
+    );
 
     const lines: string[] = ['## Relevant Past Work (semantic match)\n'];
     for (const obs of observations.slice(0, limit)) {

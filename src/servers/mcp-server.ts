@@ -53,7 +53,7 @@ function errorIfWorkerScriptMissing(): void {
 }
 
 const TOOL_ENDPOINT_MAP: Record<string, string> = {
-  'search': '/api/search',
+  'index': '/api/search',
   'timeline': '/api/timeline'
 };
 
@@ -145,6 +145,42 @@ async function callWorkerAPIPost(
   }
 }
 
+async function callWorkerAPIRaw(
+  endpoint: string,
+  method: 'GET' | 'DELETE'
+): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
+  logger.debug('HTTP', 'Worker API request (raw)', undefined, { endpoint, method });
+
+  try {
+    const response = await workerHttpRequest(endpoint, { method });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Worker API error (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+
+    logger.debug('HTTP', 'Worker API success (raw)', undefined, { endpoint, method });
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify(data, null, 2)
+      }]
+    };
+  } catch (error: unknown) {
+    logger.error('HTTP', 'Worker API error (raw)', { endpoint, method }, error instanceof Error ? error : new Error(String(error)));
+    return {
+      content: [{
+        type: 'text' as const,
+        text: `Error calling Worker API: ${error instanceof Error ? error.message : String(error)}`
+      }],
+      isError: true
+    };
+  }
+}
+
 async function verifyWorkerConnection(): Promise<boolean> {
   try {
     const response = await workerHttpRequest('/api/health');
@@ -170,14 +206,14 @@ async function ensureWorkerConnection(): Promise<boolean> {
     if (result === 'dead') {
       logger.error(
         'SYSTEM',
-        'Worker auto-start failed — MCP tools that require the worker (search, timeline, get_observations) will fail until the worker is running. Check earlier log lines for the specific failure reason (Bun not found, missing worker bundle, port conflict, etc.).'
+        'Worker auto-start failed — MCP tools that require the worker (search modes: index/timeline/fetch) will fail until the worker is running. Check earlier log lines for the specific failure reason (Bun not found, missing worker bundle, port conflict, etc.).'
       );
     }
     return result !== 'dead';
   } catch (error: unknown) {
     logger.error(
       'SYSTEM',
-      'Worker auto-start threw — MCP tools that require the worker (search, timeline, get_observations) will fail until the worker is running.',
+      'Worker auto-start threw — MCP tools that require the worker (search modes: index/timeline/fetch) will fail until the worker is running.',
       undefined,
       error instanceof Error ? error : new Error(String(error))
     );
@@ -185,13 +221,13 @@ async function ensureWorkerConnection(): Promise<boolean> {
   }
 }
 
-const tools = [
+export const tools = [
   {
     name: '__IMPORTANT',
     description: `3-LAYER WORKFLOW (ALWAYS FOLLOW):
-1. search(query) → Get index with IDs (~50-100 tokens/result)
-2. timeline(anchor=ID) → Get context around interesting results
-3. get_observations([IDs]) → Fetch full details ONLY for filtered IDs
+1. search(mode='index', query) → Get index with IDs (~50-100 tokens/result)
+2. search(mode='timeline', anchor=ID) → Get context around interesting results
+3. search(mode='fetch', ids=[...]) → Fetch full details ONLY for filtered IDs
 NEVER fetch full details without filtering first. 10x token savings.`,
     inputSchema: {
       type: 'object',
@@ -205,15 +241,15 @@ NEVER fetch full details without filtering first. 10x token savings.`,
 **3-Layer Pattern (ALWAYS follow this):**
 
 1. **Search** - Get index of results with IDs
-   \`search(query="...", limit=20, project="...")\`
+   \`search(mode="index", query="...", limit=20, project="...")\`
    Returns: Table with IDs, titles, dates (~50-100 tokens/result)
 
 2. **Timeline** - Get context around interesting results
-   \`timeline(anchor=<ID>, depth_before=3, depth_after=3)\`
+   \`search(mode="timeline", anchor=<ID>, depth_before=3, depth_after=3)\`
    Returns: Chronological context showing what was happening
 
 3. **Fetch** - Get full details ONLY for relevant IDs
-   \`get_observations(ids=[...])\`  # ALWAYS batch for 2+ items
+   \`search(mode="fetch", ids=[...])\`  # ALWAYS batch for 2+ items
    Returns: Complete details (~500-1000 tokens/result)
 
 **Why:** 10x token savings. Never fetch full details without filtering first.`
@@ -222,281 +258,260 @@ NEVER fetch full details without filtering first. 10x token savings.`,
   },
   {
     name: 'search',
-    description: 'Step 1: Search memory. Returns index with IDs. Params: query, limit, project, platformSource, type, obs_type, dateStart, dateEnd, offset, orderBy',
+    description: "Memory search, 3-layer workflow. mode='index': Step 1, search memory, returns index with IDs (params: query, limit, project, platformSource, type, obs_type, dateStart, dateEnd, offset, orderBy). mode='timeline': Step 2, get context around results (params: anchor OR query, depth_before, depth_after, project). mode='fetch': Step 3, fetch full details for filtered IDs (params: ids, required array).",
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Search query' },
-        limit: { type: 'number', description: 'Max results (default 20)' },
-        project: { type: 'string', description: 'Filter by project name' },
-        platformSource: { type: 'string', description: "Filter by platform source (e.g. claude, grok, codex, opencode) — restricts results to that agent's own memory" },
-        type: { type: 'string', description: 'Filter by observation type' },
-        obs_type: { type: 'string', description: 'Filter by obs_type field' },
-        dateStart: { type: 'string', description: 'Start date filter (ISO)' },
-        dateEnd: { type: 'string', description: 'End date filter (ISO)' },
-        offset: { type: 'number', description: 'Pagination offset' },
-        orderBy: { type: 'string', description: 'Sort order: date_desc or date_asc' }
-      },
-      additionalProperties: true
-    },
-    handler: async (args: any) => {
-      const endpoint = TOOL_ENDPOINT_MAP['search'];
-      return await callWorkerAPI(endpoint, args);
-    }
-  },
-  {
-    name: 'timeline',
-    description: 'Step 2: Get context around results. Params: anchor (observation ID) OR query (finds anchor automatically), depth_before, depth_after, project',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        anchor: { type: 'number', description: 'Observation ID to center the timeline around' },
-        query: { type: 'string', description: 'Query to find anchor automatically' },
-        depth_before: { type: 'number', description: 'Items before anchor (default 3)' },
-        depth_after: { type: 'number', description: 'Items after anchor (default 3)' },
-        project: { type: 'string', description: 'Filter by project name' }
-      },
-      additionalProperties: true
-    },
-    handler: async (args: any) => {
-      const endpoint = TOOL_ENDPOINT_MAP['timeline'];
-      return await callWorkerAPI(endpoint, args);
-    }
-  },
-  {
-    name: 'get_observations',
-    description: 'Step 3: Fetch full details for filtered IDs. Params: ids (array of observation IDs, required), orderBy, limit, project',
-    inputSchema: {
-      type: 'object',
-      properties: {
+        mode: {
+          type: 'string',
+          enum: ['index', 'timeline', 'fetch'],
+          description: "'index' (keyword/semantic search), 'timeline' (chronological context around an anchor), 'fetch' (full details for specific IDs)"
+        },
+        query: { type: 'string', description: 'Search query (mode=index) or query to auto-find an anchor (mode=timeline)' },
+        limit: { type: 'number', description: 'Max results (default 20) — mode=index' },
+        project: { type: 'string', description: 'Filter by project name — mode=index, timeline' },
+        platformSource: { type: 'string', description: "Filter by platform source (e.g. claude, grok, codex, opencode) — restricts results to that agent's own memory — mode=index" },
+        type: { type: 'string', description: 'Filter by observation type — mode=index' },
+        obs_type: { type: 'string', description: 'Filter by obs_type field — mode=index' },
+        dateStart: { type: 'string', description: 'Start date filter (ISO) — mode=index' },
+        dateEnd: { type: 'string', description: 'End date filter (ISO) — mode=index' },
+        offset: { type: 'number', description: 'Pagination offset — mode=index' },
+        orderBy: { type: 'string', description: 'Sort order: date_desc or date_asc — mode=index' },
+        anchor: { type: 'number', description: 'Observation ID to center the timeline around — mode=timeline' },
+        depth_before: { type: 'number', description: 'Items before anchor (default 3) — mode=timeline' },
+        depth_after: { type: 'number', description: 'Items after anchor (default 3) — mode=timeline' },
         ids: {
           type: 'array',
           items: { type: 'number' },
-          description: 'Array of observation IDs to fetch (required)'
+          description: 'Array of observation IDs to fetch — required for mode=fetch'
         }
       },
-      required: ['ids'],
+      required: ['mode'],
       additionalProperties: true
     },
     handler: async (args: any) => {
-      return await callWorkerAPIPost('/api/observations/batch', args);
-    }
-  },
-  {
-    name: 'smart_search',
-    description: 'Search codebase for symbols, functions, classes using tree-sitter AST parsing. Returns folded structural views with token counts. Use path parameter to scope the search.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: 'Search term — matches against symbol names, file names, and file content'
-        },
-        path: {
-          type: 'string',
-          description: 'Root directory to search (default: current working directory)'
-        },
-        max_results: {
-          type: 'number',
-          description: 'Maximum results to return (default: 20)'
-        },
-        file_pattern: {
-          type: 'string',
-          description: 'Substring filter for file paths (e.g. ".ts", "src/services")'
+      const { mode, ...rest } = args;
+      switch (mode) {
+        case 'index': {
+          return await callWorkerAPI(TOOL_ENDPOINT_MAP['index'], rest);
         }
-      },
-      required: ['query']
-    },
-    handler: async (args: any) => {
-      const rootDir = resolve(args.path || process.cwd());
-      const result = await searchCodebase(rootDir, args.query, {
-        maxResults: args.max_results || 20,
-        filePattern: args.file_pattern
-      });
-      const formatted = formatSearchResults(result, args.query);
-      return {
-        content: [{ type: 'text' as const, text: formatted }]
-      };
-    }
-  },
-  {
-    name: 'smart_unfold',
-    description: 'Expand a specific symbol (function, class, method) from a file. Returns the full source code of just that symbol. Use after smart_search or smart_outline to read specific code.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        file_path: {
-          type: 'string',
-          description: 'Path to the source file'
-        },
-        symbol_name: {
-          type: 'string',
-          description: 'Name of the symbol to unfold (function, class, method, etc.)'
+        case 'timeline': {
+          return await callWorkerAPI(TOOL_ENDPOINT_MAP['timeline'], rest);
         }
-      },
-      required: ['file_path', 'symbol_name']
-    },
-    handler: async (args: any) => {
-      const filePath = resolve(args.file_path);
-      const content = await readFile(filePath, 'utf-8');
-      const projectRoot = findProjectRoot(filePath) ?? process.cwd();
-      const unfolded = unfoldSymbol(content, filePath, args.symbol_name, projectRoot);
-      if (unfolded) {
-        return {
-          content: [{ type: 'text' as const, text: unfolded }]
-        };
+        case 'fetch': {
+          if (!Array.isArray(rest.ids) || rest.ids.length === 0) {
+            throw new Error("Missing required argument: ids (required for mode='fetch')");
+          }
+          return await callWorkerAPIPost('/api/observations/batch', rest);
+        }
+        default:
+          throw new Error(`Unknown mode: ${mode}. Expected 'index' | 'timeline' | 'fetch'.`);
       }
-      const parsed = parseFile(content, filePath, projectRoot);
-      if (parsed.symbols.length > 0) {
-        const available = parsed.symbols.map(s => `  - ${s.name} (${s.kind})`).join('\n');
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Symbol "${args.symbol_name}" not found in ${args.file_path}.\n\nAvailable symbols:\n${available}`
-          }]
-        };
-      }
-      return {
-        content: [{
-          type: 'text' as const,
-          text: `Could not parse ${args.file_path}. File may be unsupported or empty.`
-        }]
-      };
     }
   },
   {
-    name: 'smart_outline',
-    description: 'Get structural outline of a file — shows all symbols (functions, classes, methods, types) with signatures but bodies folded. Much cheaper than reading the full file.',
+    name: 'code',
+    description: "Codebase structural tools (tree-sitter AST). mode='search': find symbols/files by term (params: query required, path, max_results, file_pattern). mode='outline': structural map of one file, symbols with folded bodies (params: file_path required). mode='unfold': full source of one symbol from a file (params: file_path, symbol_name, both required).",
     inputSchema: {
       type: 'object',
       properties: {
-        file_path: {
+        mode: {
           type: 'string',
-          description: 'Path to the source file'
+          enum: ['search', 'outline', 'unfold'],
+          description: "'search' (find symbols/files by term), 'outline' (structural map of one file), 'unfold' (full source of one symbol)"
+        },
+        query: { type: 'string', description: 'Search term — matches symbol names, file names, file content — required for mode=search' },
+        path: { type: 'string', description: 'Root directory to search (default: current working directory) — mode=search' },
+        max_results: { type: 'number', description: 'Maximum results to return (default: 20) — mode=search' },
+        file_pattern: { type: 'string', description: 'Substring filter for file paths (e.g. ".ts", "src/services") — mode=search' },
+        file_path: { type: 'string', description: 'Path to the source file — required for mode=outline, unfold' },
+        symbol_name: { type: 'string', description: 'Name of the symbol to unfold (function, class, method, etc.) — required for mode=unfold' }
+      },
+      required: ['mode'],
+      additionalProperties: true
+    },
+    handler: async (args: any) => {
+      const { mode, ...rest } = args;
+      switch (mode) {
+        case 'search': {
+          if (typeof rest.query !== 'string' || rest.query.trim() === '') {
+            throw new Error("Missing required argument: query (required for mode='search')");
+          }
+          const rootDir = resolve(rest.path || process.cwd());
+          const result = await searchCodebase(rootDir, rest.query, {
+            maxResults: rest.max_results || 20,
+            filePattern: rest.file_pattern
+          });
+          const formatted = formatSearchResults(result, rest.query);
+          return {
+            content: [{ type: 'text' as const, text: formatted }]
+          };
         }
-      },
-      required: ['file_path']
-    },
-    handler: async (args: any) => {
-      const filePath = resolve(args.file_path);
-      const content = await readFile(filePath, 'utf-8');
-      const parsed = parseFile(content, filePath, findProjectRoot(filePath) ?? process.cwd());
-      if (parsed.symbols.length > 0) {
-        return {
-          content: [{ type: 'text' as const, text: formatFoldedView(parsed) }]
-        };
+        case 'outline': {
+          if (typeof rest.file_path !== 'string' || rest.file_path.trim() === '') {
+            throw new Error("Missing required argument: file_path (required for mode='outline')");
+          }
+          const filePath = resolve(rest.file_path);
+          const content = await readFile(filePath, 'utf-8');
+          const parsed = parseFile(content, filePath, findProjectRoot(filePath) ?? process.cwd());
+          if (parsed.symbols.length > 0) {
+            return {
+              content: [{ type: 'text' as const, text: formatFoldedView(parsed) }]
+            };
+          }
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Could not parse ${rest.file_path}. File may use an unsupported language or be empty.`
+            }]
+          };
+        }
+        case 'unfold': {
+          if (typeof rest.file_path !== 'string' || rest.file_path.trim() === '') {
+            throw new Error("Missing required argument: file_path (required for mode='unfold')");
+          }
+          if (typeof rest.symbol_name !== 'string' || rest.symbol_name.trim() === '') {
+            throw new Error("Missing required argument: symbol_name (required for mode='unfold')");
+          }
+          const filePath = resolve(rest.file_path);
+          const content = await readFile(filePath, 'utf-8');
+          const projectRoot = findProjectRoot(filePath) ?? process.cwd();
+          const unfolded = unfoldSymbol(content, filePath, rest.symbol_name, projectRoot);
+          if (unfolded) {
+            return {
+              content: [{ type: 'text' as const, text: unfolded }]
+            };
+          }
+          const parsed = parseFile(content, filePath, projectRoot);
+          if (parsed.symbols.length > 0) {
+            const available = parsed.symbols.map(s => `  - ${s.name} (${s.kind})`).join('\n');
+            return {
+              content: [{
+                type: 'text' as const,
+                text: `Symbol "${rest.symbol_name}" not found in ${rest.file_path}.\n\nAvailable symbols:\n${available}`
+              }]
+            };
+          }
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Could not parse ${rest.file_path}. File may be unsupported or empty.`
+            }]
+          };
+        }
+        default:
+          throw new Error(`Unknown mode: ${mode}. Expected 'search' | 'outline' | 'unfold'.`);
       }
-      return {
-        content: [{
-          type: 'text' as const,
-          text: `Could not parse ${args.file_path}. File may use an unsupported language or be empty.`
-        }]
+    }
+  },
+  {
+    name: 'corpus',
+    description: "Knowledge corpus management. action='build': create a corpus from filtered observations (params: name required, description, project, types, concepts, files, query, dateStart, dateEnd, limit). action='list': list all corpora with stats. action='get': fetch one corpus's metadata (params: name required). action='delete': delete a corpus (params: name required). action='prime': create an AI session loaded with corpus knowledge (params: name required; must run before query). action='query': ask a question of a primed corpus (params: name, question, both required). action='rebuild': re-run the stored filter to refresh the corpus (params: name required). action='reprime': create a fresh knowledge-agent session, clearing prior Q&A context (params: name required).",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['build', 'list', 'get', 'delete', 'prime', 'query', 'rebuild', 'reprime'],
+          description: "Which corpus operation to perform"
+        },
+        name: { type: 'string', description: 'Corpus name — required for every action except list' },
+        description: { type: 'string', description: 'What this corpus is about — action=build' },
+        project: { type: 'string', description: 'Filter by project — action=build' },
+        types: { type: 'string', description: 'Comma-separated observation types: decision,bugfix,feature,refactor,discovery,change — action=build' },
+        concepts: { type: 'string', description: 'Comma-separated concepts to filter by — action=build' },
+        files: { type: 'string', description: 'Comma-separated file paths to filter by — action=build' },
+        query: { type: 'string', description: 'Semantic search query — action=build' },
+        dateStart: { type: 'string', description: 'Start date (ISO format) — action=build' },
+        dateEnd: { type: 'string', description: 'End date (ISO format) — action=build' },
+        limit: { type: 'number', description: 'Maximum observations (default 500) — action=build' },
+        question: { type: 'string', description: 'The question to ask — required for action=query' }
+      },
+      required: ['action'],
+      additionalProperties: true
+    },
+    handler: async (args: any) => {
+      const { action, name, ...rest } = args;
+      const requireName = (a: string) => {
+        if (typeof name !== 'string' || name.trim() === '') {
+          throw new Error(`Missing required argument: name (required for action='${a}')`);
+        }
       };
+      switch (action) {
+        case 'build': {
+          requireName('build');
+          // The build route (CorpusRoutes buildCorpusSchema) reads snake_case
+          // date_start/date_end; map the tool's camelCase fields across so the
+          // date filter is actually applied instead of silently dropped.
+          const { dateStart, dateEnd, ...buildRest } = rest;
+          const payload: Record<string, unknown> = { name, ...buildRest };
+          if (dateStart !== undefined) payload.date_start = dateStart;
+          if (dateEnd !== undefined) payload.date_end = dateEnd;
+          return await callWorkerAPIPost('/api/corpus', payload);
+        }
+        case 'list': {
+          return await callWorkerAPI('/api/corpus', rest);
+        }
+        case 'get': {
+          requireName('get');
+          return await callWorkerAPIRaw(`/api/corpus/${encodeURIComponent(name)}`, 'GET');
+        }
+        case 'delete': {
+          requireName('delete');
+          return await callWorkerAPIRaw(`/api/corpus/${encodeURIComponent(name)}`, 'DELETE');
+        }
+        case 'prime': {
+          requireName('prime');
+          return await callWorkerAPIPost(`/api/corpus/${encodeURIComponent(name)}/prime`, rest);
+        }
+        case 'query': {
+          requireName('query');
+          if (typeof rest.question !== 'string' || rest.question.trim() === '') {
+            throw new Error("Missing required argument: question (required for action='query')");
+          }
+          return await callWorkerAPIPost(`/api/corpus/${encodeURIComponent(name)}/query`, rest);
+        }
+        case 'rebuild': {
+          requireName('rebuild');
+          return await callWorkerAPIPost(`/api/corpus/${encodeURIComponent(name)}/rebuild`, rest);
+        }
+        case 'reprime': {
+          requireName('reprime');
+          return await callWorkerAPIPost(`/api/corpus/${encodeURIComponent(name)}/reprime`, rest);
+        }
+        default:
+          throw new Error(`Unknown action: ${action}. Expected 'build' | 'list' | 'get' | 'delete' | 'prime' | 'query' | 'rebuild' | 'reprime'.`);
+      }
     }
   },
   {
-    name: 'build_corpus',
-    description: 'Build a knowledge corpus from filtered observations. Creates a queryable knowledge agent. Params: name (required), description, project, types (comma-separated), concepts (comma-separated), files (comma-separated), query, dateStart, dateEnd, limit',
+    name: 'manage',
+    description: 'Administrative actions. action=stats: store/vector counts + compaction preview (cheap). action=compact: prune/flatten aged, near-duplicate, and low-signal observations. SAFETY: compact defaults to dry_run=true (preview only) — pass dry_run=false to actually delete/write.',
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Corpus name (used as filename)' },
-        description: { type: 'string', description: 'What this corpus is about' },
-        project: { type: 'string', description: 'Filter by project' },
-        types: { type: 'string', description: 'Comma-separated observation types: decision,bugfix,feature,refactor,discovery,change' },
-        concepts: { type: 'string', description: 'Comma-separated concepts to filter by' },
-        files: { type: 'string', description: 'Comma-separated file paths to filter by' },
-        query: { type: 'string', description: 'Semantic search query' },
-        dateStart: { type: 'string', description: 'Start date (ISO format)' },
-        dateEnd: { type: 'string', description: 'End date (ISO format)' },
-        limit: { type: 'number', description: 'Maximum observations (default 500)' }
+        action: { type: 'string', enum: ['stats', 'compact'], description: 'stats or compact' },
+        dry_run: { type: 'boolean', description: 'compact only. Default true (preview). Set false to apply.' },
+        project: { type: 'string', description: 'compact only. Scope to one project (default: all). Ignored by stats (always global).' },
+        age_days: { type: 'number', description: 'compact only. AGE window override (default from settings)' },
+        near_dup_threshold: { type: 'number', description: 'compact only. Cosine similarity threshold, default 0.93' },
+        low_signal_min_age_days: { type: 'number', description: 'compact only. Min age before "never retrieved" counts, default 30' }
       },
-      required: ['name'],
-      additionalProperties: true
+      required: ['action'],
+      additionalProperties: false
     },
     handler: async (args: any) => {
-      return await callWorkerAPIPost('/api/corpus', args);
-    }
-  },
-  {
-    name: 'list_corpora',
-    description: 'List all knowledge corpora with their stats and priming status',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      additionalProperties: true
-    },
-    handler: async (args: any) => {
-      return await callWorkerAPI('/api/corpus', args);
-    }
-  },
-  {
-    name: 'prime_corpus',
-    description: 'Prime a knowledge corpus — creates an AI session loaded with the corpus knowledge. Must be called before query_corpus.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Name of the corpus to prime' }
-      },
-      required: ['name'],
-      additionalProperties: true
-    },
-    handler: async (args: any) => {
-      const { name, ...rest } = args;
-      if (typeof name !== 'string' || name.trim() === '') throw new Error('Missing required argument: name');
-      return await callWorkerAPIPost(`/api/corpus/${encodeURIComponent(name)}/prime`, rest);
-    }
-  },
-  {
-    name: 'query_corpus',
-    description: 'Ask a question to a primed knowledge corpus. The corpus must be primed first with prime_corpus.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Name of the corpus to query' },
-        question: { type: 'string', description: 'The question to ask' }
-      },
-      required: ['name', 'question'],
-      additionalProperties: true
-    },
-    handler: async (args: any) => {
-      const { name, ...rest } = args;
-      if (typeof name !== 'string' || name.trim() === '') throw new Error('Missing required argument: name');
-      return await callWorkerAPIPost(`/api/corpus/${encodeURIComponent(name)}/query`, rest);
-    }
-  },
-  {
-    name: 'rebuild_corpus',
-    description: 'Rebuild a knowledge corpus from its stored filter — re-runs the search to refresh with new observations. Does not re-prime the session.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Name of the corpus to rebuild' }
-      },
-      required: ['name'],
-      additionalProperties: true
-    },
-    handler: async (args: any) => {
-      const { name, ...rest } = args;
-      if (typeof name !== 'string' || name.trim() === '') throw new Error('Missing required argument: name');
-      return await callWorkerAPIPost(`/api/corpus/${encodeURIComponent(name)}/rebuild`, rest);
-    }
-  },
-  {
-    name: 'reprime_corpus',
-    description: 'Create a fresh knowledge agent session for a corpus, clearing prior Q&A context. Use when conversation has drifted or after rebuilding.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Name of the corpus to reprime' }
-      },
-      required: ['name'],
-      additionalProperties: true
-    },
-    handler: async (args: any) => {
-      const { name, ...rest } = args;
-      if (typeof name !== 'string' || name.trim() === '') throw new Error('Missing required argument: name');
-      return await callWorkerAPIPost(`/api/corpus/${encodeURIComponent(name)}/reprime`, rest);
+      if (args.action === 'stats') return await callWorkerAPIRaw('/api/stats', 'GET');
+      if (args.action === 'compact') {
+        return await callWorkerAPIPost('/api/manage/compact', {
+          dryRun: args.dry_run !== false,
+          project: args.project,
+          ageDays: args.age_days,
+          nearDupThreshold: args.near_dup_threshold,
+          lowSignalMinAgeDays: args.low_signal_min_age_days,
+        });
+      }
+      throw new Error(`Unknown manage action: ${args.action}`);
     }
   }
 ];
@@ -649,7 +664,13 @@ async function main() {
   }, 0);
 }
 
-main().catch((error) => {
-  logger.error('SYSTEM', 'Fatal error', undefined, error);
-  process.exit(0);
-});
+// Auto-start only when run as the actual MCP server entrypoint. Under vitest the
+// module is imported to unit-test `tools` handlers, and must NOT connect a
+// stdio transport / start heartbeats (VITEST is set by the test runner; the
+// bundled runtime .cjs never has it set, so production behavior is unchanged).
+if (!process.env.VITEST) {
+  main().catch((error) => {
+    logger.error('SYSTEM', 'Fatal error', undefined, error);
+    process.exit(0);
+  });
+}

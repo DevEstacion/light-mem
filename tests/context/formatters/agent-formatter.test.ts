@@ -424,11 +424,11 @@ describe('AgentFormatter', () => {
       expect(joined).toContain('10k');
     });
 
-    it('should mention mem-search skill', () => {
+    it('should mention smart-search skill', () => {
       const result = renderAgentFooter(5000, 100);
       const joined = result.join('\n');
 
-      expect(joined).toContain('mem-search skill');
+      expect(joined).toContain('smart-search skill');
     });
 
     it('should round work tokens to nearest thousand', () => {

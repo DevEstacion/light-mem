@@ -3,6 +3,7 @@ import path from 'path';
 import { homedir } from 'os';
 import { unlinkSync } from 'fs';
 import { SessionStore } from '../sqlite/SessionStore.js';
+import { recordObservationFeedback } from '../sqlite/feedback.js';
 import { logger } from '../../utils/logger.js';
 import { getProjectContext } from '../../utils/project-name.js';
 
@@ -161,7 +162,8 @@ function buildInjectStats(
 
 export async function generateContextWithStats(
   input?: ContextInput,
-  forHuman: boolean = false
+  forHuman: boolean = false,
+  recordFeedback: boolean = false
 ): Promise<{ text: string; stats: ContextInjectStats | null }> {
   const config = loadContextConfig();
   const cwd = input?.cwd ?? process.cwd();
@@ -190,6 +192,14 @@ export async function generateContextWithStats(
 
     if (observations.length === 0 && summaries.length === 0) {
       return { text: renderEmptyState(project, forHuman), stats: null };
+    }
+
+    // Record an injection signal for the observations actually surfaced into the
+    // agent's context, so compaction's low-signal pruning treats auto-injected
+    // observations as "used" (not just explicitly-fetched ones). Only real
+    // injections opt in — preview callers pass recordFeedback=false.
+    if (recordFeedback) {
+      recordObservationFeedback(db.db, observations.map((o) => o.id).filter((id): id is number => typeof id === 'number'), 'injection');
     }
 
     const output = buildContextOutput(

@@ -312,6 +312,20 @@ export async function runUninstallCommand(): Promise<void> {
       },
     },
     {
+      title: 'Removing Grok hooks integration',
+      task: async () => {
+        try {
+          const { uninstallGrokIntegration } = await import('../../services/integrations/GrokInstaller.js');
+          const result = uninstallGrokIntegration();
+          return result === 0
+            ? `Grok hooks removed ${pc.green('OK')}`
+            : `Grok hooks removal had errors ${pc.yellow('!')}`;
+        } catch {
+          return `Grok hooks not installed ${pc.dim('skipped')}`;
+        }
+      },
+    },
+    {
       title: 'Removing stray light-mem caches and logs',
       task: async () => {
         const removed = removeStrayLightMemPaths();

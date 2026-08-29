@@ -23,7 +23,7 @@
             "shell": "bash",
             "command": "node -e \"const f=require('fs'),p=require('path'),o=require('os'),c=require('child_process');const h=o.homedir();const C=process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude');const E=process.env.CLAUDE_PLUGIN_ROOT||process.env.GROK_PLUGIN_ROOT||process.env.PLUGIN_ROOT||'';const L=x=>{try{return f.readdirSync(x).filter(n=>/^\\\\d/.test(n)).map(n=>p.join(x,n)).filter(z=>{try{return f.statSync(z).isDirectory()}catch{return false}}).sort((a,b)=>f.statSync(b).mtimeMs-f.statSync(a).mtimeMs)}catch{return[]}};const K=[E,...L(p.join(C,'plugins','cache','light-mem','light-mem')),p.join(C,'plugins','marketplaces','light-mem','plugin')].filter(Boolean);const need=[\\\"node-runner.js\\\",\\\"worker-service.cjs\\\"];let R=null;for(const k of K){const r=f.existsSync(p.join(k,'plugin','scripts'))?p.join(k,'plugin'):k;if(need.every(s=>f.existsSync(p.join(r,'scripts',s)))){R=r;break}}if(!R){process.stderr.write(\\\"light-mem: plugin scripts not found\\\\n\\\");process.exit(1)}const argv=[\\\"node-runner.js\\\",\\\"worker-service.cjs\\\"].map(s=>p.join(R,'scripts',s)).concat([\\\"start\\\"]);const env=Object.assign({},process.env,{});const r=c.spawnSync(process.execPath,argv,{stdio:'inherit',env:env});const j=\\\"{\\\\\\\"continue\\\\\\\":true,\\\\\\\"suppressOutput\\\\\\\":true}\\\";if(j)process.stdout.write(j+'\\\\n');process.exit(r.status==null?1:r.status);\"",
             "timeout": 10,
-            "statusMessage": "🧠 light-mem: starting memory worker…"
+            "statusMessage": "\ud83e\udde0 light-mem: starting memory worker\u2026"
           },
           {
             "type": "command",
@@ -36,7 +36,7 @@
             "shell": "bash",
             "command": "node -e \"const f=require('fs'),p=require('path'),o=require('os'),c=require('child_process');const h=o.homedir();const C=process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude');const E=process.env.CLAUDE_PLUGIN_ROOT||process.env.GROK_PLUGIN_ROOT||process.env.PLUGIN_ROOT||'';const L=x=>{try{return f.readdirSync(x).filter(n=>/^\\\\d/.test(n)).map(n=>p.join(x,n)).filter(z=>{try{return f.statSync(z).isDirectory()}catch{return false}}).sort((a,b)=>f.statSync(b).mtimeMs-f.statSync(a).mtimeMs)}catch{return[]}};const K=[E,...L(p.join(C,'plugins','cache','light-mem','light-mem')),p.join(C,'plugins','marketplaces','light-mem','plugin')].filter(Boolean);const need=[\\\"version-check.js\\\"];let R=null;for(const k of K){const r=f.existsSync(p.join(k,'plugin','scripts'))?p.join(k,'plugin'):k;if(need.every(s=>f.existsSync(p.join(r,'scripts',s)))){R=r;break}}if(!R){process.stderr.write(\\\"light-mem: version-check.js not found\\\\n\\\");process.exit(1)}const argv=[\\\"version-check.js\\\"].map(s=>p.join(R,'scripts',s)).concat([]);const env=Object.assign({},process.env,{});const ch=c.spawn(process.execPath,argv,{stdio:'ignore',detached:true,env:env});ch.unref();process.exit(0);\"",
             "timeout": 60,
-            "statusMessage": "🧠 light-mem: checking for updates…"
+            "statusMessage": "\ud83e\udde0 light-mem: checking for updates\u2026"
           }
         ]
       }
@@ -49,33 +49,34 @@
             "shell": "bash",
             "command": "node -e \"const f=require('fs'),p=require('path'),o=require('os'),c=require('child_process');const h=o.homedir();const C=process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude');const E=process.env.CLAUDE_PLUGIN_ROOT||process.env.GROK_PLUGIN_ROOT||process.env.PLUGIN_ROOT||'';const L=x=>{try{return f.readdirSync(x).filter(n=>/^\\\\d/.test(n)).map(n=>p.join(x,n)).filter(z=>{try{return f.statSync(z).isDirectory()}catch{return false}}).sort((a,b)=>f.statSync(b).mtimeMs-f.statSync(a).mtimeMs)}catch{return[]}};const K=[E,...L(p.join(C,'plugins','cache','light-mem','light-mem')),p.join(C,'plugins','marketplaces','light-mem','plugin')].filter(Boolean);const need=[\\\"node-runner.js\\\",\\\"worker-service.cjs\\\"];let R=null;for(const k of K){const r=f.existsSync(p.join(k,'plugin','scripts'))?p.join(k,'plugin'):k;if(need.every(s=>f.existsSync(p.join(r,'scripts',s)))){R=r;break}}if(!R){process.stderr.write(\\\"light-mem: plugin scripts not found\\\\n\\\");process.exit(1)}const argv=[\\\"node-runner.js\\\",\\\"worker-service.cjs\\\"].map(s=>p.join(R,'scripts',s)).concat([\\\"hook\\\",\\\"claude-code\\\",\\\"session-init\\\"]);const env=Object.assign({},process.env,{});const r=c.spawnSync(process.execPath,argv,{stdio:'inherit',env:env});const j=null;if(j)process.stdout.write(j+'\\\\n');process.exit(r.status==null?1:r.status);\"",
             "timeout": 10,
-            "statusMessage": "🧠 light-mem: preparing context…"
+            "statusMessage": "\ud83e\udde0 light-mem: preparing context\u2026"
           }
         ]
       }
     ],
-    "PostToolUse": [
+    "PostToolBatch": [
       {
         "hooks": [
           {
             "type": "command",
             "shell": "bash",
-            "command": "node -e \"const f=require('fs'),p=require('path'),o=require('os'),c=require('child_process');const h=o.homedir();const C=process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude');const E=process.env.CLAUDE_PLUGIN_ROOT||process.env.GROK_PLUGIN_ROOT||process.env.PLUGIN_ROOT||'';const L=x=>{try{return f.readdirSync(x).filter(n=>/^\\\\d/.test(n)).map(n=>p.join(x,n)).filter(z=>{try{return f.statSync(z).isDirectory()}catch{return false}}).sort((a,b)=>f.statSync(b).mtimeMs-f.statSync(a).mtimeMs)}catch{return[]}};const K=[E,...L(p.join(C,'plugins','cache','light-mem','light-mem')),p.join(C,'plugins','marketplaces','light-mem','plugin')].filter(Boolean);const need=[\\\"node-runner.js\\\",\\\"worker-service.cjs\\\"];let R=null;for(const k of K){const r=f.existsSync(p.join(k,'plugin','scripts'))?p.join(k,'plugin'):k;if(need.every(s=>f.existsSync(p.join(r,'scripts',s)))){R=r;break}}if(!R){process.stderr.write(\\\"light-mem: plugin scripts not found\\\\n\\\");process.exit(1)}const argv=[\\\"node-runner.js\\\",\\\"worker-service.cjs\\\"].map(s=>p.join(R,'scripts',s)).concat([\\\"hook\\\",\\\"claude-code\\\",\\\"observation\\\"]);const env=Object.assign({},process.env,{});const r=c.spawnSync(process.execPath,argv,{stdio:'inherit',env:env});const j=null;if(j)process.stdout.write(j+'\\\\n');process.exit(r.status==null?1:r.status);\"",
+            "command": "node -e \"const f=require('fs'),p=require('path'),o=require('os'),c=require('child_process');const h=o.homedir();const C=process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude');const E=process.env.CLAUDE_PLUGIN_ROOT||process.env.GROK_PLUGIN_ROOT||process.env.PLUGIN_ROOT||'';const L=x=>{try{return f.readdirSync(x).filter(n=>/^\\\\d/.test(n)).map(n=>p.join(x,n)).filter(z=>{try{return f.statSync(z).isDirectory()}catch{return false}}).sort((a,b)=>f.statSync(b).mtimeMs-f.statSync(a).mtimeMs)}catch{return[]}};const K=[E,...L(p.join(C,'plugins','cache','light-mem','light-mem')),p.join(C,'plugins','marketplaces','light-mem','plugin')].filter(Boolean);const need=[\\\"node-runner.js\\\",\\\"worker-service.cjs\\\"];let R=null;for(const k of K){const r=f.existsSync(p.join(k,'plugin','scripts'))?p.join(k,'plugin'):k;if(need.every(s=>f.existsSync(p.join(r,'scripts',s)))){R=r;break}}if(!R){process.stderr.write(\\\"light-mem: plugin scripts not found\\\\n\\\");process.exit(1)}const argv=[\\\"node-runner.js\\\",\\\"worker-service.cjs\\\"].map(s=>p.join(R,'scripts',s)).concat([\\\"hook\\\",\\\"claude-code\\\",\\\"observation-batch\\\"]);const env=Object.assign({},process.env,{});const r=c.spawnSync(process.execPath,argv,{stdio:'inherit',env:env});const j=null;if(j)process.stdout.write(j+'\\\\n');process.exit(r.status==null?1:r.status);\"",
             "timeout": 120,
-            "statusMessage": "🧠 light-mem…"
+            "statusMessage": "\ud83e\udde0 light-mem\u2026"
           }
         ]
       }
     ],
     "PreToolUse": [
       {
+        "matcher": "Read|read_file|Edit|Write",
         "hooks": [
           {
             "type": "command",
             "shell": "bash",
             "command": "node -e \"const f=require('fs'),p=require('path'),o=require('os'),c=require('child_process');const h=o.homedir();const C=process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude');const E=process.env.CLAUDE_PLUGIN_ROOT||process.env.GROK_PLUGIN_ROOT||process.env.PLUGIN_ROOT||'';const L=x=>{try{return f.readdirSync(x).filter(n=>/^\\\\d/.test(n)).map(n=>p.join(x,n)).filter(z=>{try{return f.statSync(z).isDirectory()}catch{return false}}).sort((a,b)=>f.statSync(b).mtimeMs-f.statSync(a).mtimeMs)}catch{return[]}};const K=[E,...L(p.join(C,'plugins','cache','light-mem','light-mem')),p.join(C,'plugins','marketplaces','light-mem','plugin')].filter(Boolean);const need=[\\\"node-runner.js\\\",\\\"worker-service.cjs\\\"];let R=null;for(const k of K){const r=f.existsSync(p.join(k,'plugin','scripts'))?p.join(k,'plugin'):k;if(need.every(s=>f.existsSync(p.join(r,'scripts',s)))){R=r;break}}if(!R){process.stderr.write(\\\"light-mem: plugin scripts not found\\\\n\\\");process.exit(1)}const argv=[\\\"node-runner.js\\\",\\\"worker-service.cjs\\\"].map(s=>p.join(R,'scripts',s)).concat([\\\"hook\\\",\\\"claude-code\\\",\\\"file-context\\\"]);const env=Object.assign({},process.env,{});const r=c.spawnSync(process.execPath,argv,{stdio:'inherit',env:env});const j=null;if(j)process.stdout.write(j+'\\\\n');process.exit(r.status==null?1:r.status);\"",
             "timeout": 120,
-            "statusMessage": "🧠 light-mem…"
+            "statusMessage": "\ud83e\udde0 light-mem\u2026"
           }
         ]
       }
@@ -88,7 +89,7 @@
             "shell": "bash",
             "command": "node -e \"const f=require('fs'),p=require('path'),o=require('os'),c=require('child_process');const h=o.homedir();const C=process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude');const E=process.env.CLAUDE_PLUGIN_ROOT||process.env.GROK_PLUGIN_ROOT||process.env.PLUGIN_ROOT||'';const L=x=>{try{return f.readdirSync(x).filter(n=>/^\\\\d/.test(n)).map(n=>p.join(x,n)).filter(z=>{try{return f.statSync(z).isDirectory()}catch{return false}}).sort((a,b)=>f.statSync(b).mtimeMs-f.statSync(a).mtimeMs)}catch{return[]}};const K=[E,...L(p.join(C,'plugins','cache','light-mem','light-mem')),p.join(C,'plugins','marketplaces','light-mem','plugin')].filter(Boolean);const need=[\\\"node-runner.js\\\",\\\"worker-service.cjs\\\"];let R=null;for(const k of K){const r=f.existsSync(p.join(k,'plugin','scripts'))?p.join(k,'plugin'):k;if(need.every(s=>f.existsSync(p.join(r,'scripts',s)))){R=r;break}}if(!R){process.stderr.write(\\\"light-mem: plugin scripts not found\\\\n\\\");process.exit(1)}const argv=[\\\"node-runner.js\\\",\\\"worker-service.cjs\\\"].map(s=>p.join(R,'scripts',s)).concat([\\\"hook\\\",\\\"claude-code\\\",\\\"summarize\\\"]);const env=Object.assign({},process.env,{});const r=c.spawnSync(process.execPath,argv,{stdio:'inherit',env:env});const j=null;if(j)process.stdout.write(j+'\\\\n');process.exit(r.status==null?1:r.status);\"",
             "timeout": 120,
-            "statusMessage": "🧠 light-mem: summarizing session…"
+            "statusMessage": "\ud83e\udde0 light-mem: summarizing session\u2026"
           }
         ]
       }

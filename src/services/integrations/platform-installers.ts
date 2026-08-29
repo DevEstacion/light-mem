@@ -8,8 +8,9 @@
  *
  *   - claude-code → registers the marketplace plugin (handled by the CLI's
  *     marketplace step; the per-IDE task is a pure confirmation message).
- *   - grok        → no artifact of its own; it loads the Claude plugin hooks
- *     (camelCase stdin is handled by the shared adapter). Pure message.
+ *   - grok        → loads the shared Claude plugin hooks, but that file uses
+ *     PostToolBatch (which Grok skips), so a per-tool observation hook is
+ *     installed into ~/.grok/hooks/light-mem.json (GrokInstaller).
  *   - codex       → merges hooks into ~/.codex/hooks.json (CodexInstaller).
  *   - opencode    → installs a JS plugin bundle + AGENTS.md (OpenCodeInstaller).
  *
@@ -55,13 +56,19 @@ const claudeCodeInstaller: PlatformInstaller = {
 
 const grokInstaller: PlatformInstaller = {
   id: 'grok',
-  title: 'Grok Build: Claude plugin hooks',
-  successMessage: 'Grok Build: uses Claude plugin hooks',
+  title: 'Grok Build: installing hooks',
+  successMessage: 'Grok Build: hooks installed',
   successHint: '(trust folder + /hooks reload)',
-  // Grok Build loads Claude Code plugins (including light-mem hooks.json) with
-  // camelCase stdin; no separate installer — registering the Claude plugin is
-  // sufficient.
-  run: async () => ({ ok: true }),
+  failureMessage: 'Grok Build: hooks install failed',
+  // Grok reads the shared Claude plugin hooks.json directly, but that file uses
+  // PostToolBatch (which Grok skips). Install the per-tool observation hook into
+  // ~/.grok/hooks/light-mem.json so Grok still captures memory.
+  run: async (message) => {
+    message('Loading Grok installer…');
+    const { installGrokIntegration } = await import('./GrokInstaller.js');
+    message('Installing Grok hooks into ~/.grok/hooks/light-mem.json…');
+    return { ok: (await installGrokIntegration()) === 0 };
+  },
 };
 
 const codexInstaller: PlatformInstaller = {

@@ -14,7 +14,7 @@ import { flushResponseThen } from './flushResponseThen.js';
 import { getUptimeSeconds } from '../../shared/uptime.js';
 import { globalRateLimitStore } from '../worker/RateLimitStore.js';
 
-const INSTRUCTIONS_BASE_DIR: string = path.resolve(__dirname, '../skills/mem-search');
+const INSTRUCTIONS_BASE_DIR: string = path.resolve(__dirname, '../skills/smart-search');
 const INSTRUCTIONS_OPERATIONS_DIR: string = path.join(INSTRUCTIONS_BASE_DIR, 'operations');
 const INSTRUCTIONS_SKILL_PATH: string = path.join(INSTRUCTIONS_BASE_DIR, 'SKILL.md');
 

@@ -54,6 +54,7 @@ ${pc.bold('Runtime Commands')} (requires Node ≥24, delegates to installed plug
   ${pc.cyan('npx light-mem search <query>')}       Search observations
   ${pc.cyan('npx light-mem adopt [--dry-run] [--branch <name>]')}    Stamp merged worktrees into parent project
   ${pc.cyan('npx light-mem cleanup [--dry-run]')}    Run one-time v12.4.3 pollution cleanup (or preview counts)
+  ${pc.cyan('npx light-mem compact [--apply]')}    Preview (default) or --apply prune/flatten of aged, near-duplicate, low-signal observations
   ${pc.cyan('npx light-mem transcript watch')}     Start transcript watcher
 
 ${pc.bold('IDE Identifiers')}:
@@ -186,6 +187,12 @@ async function main(): Promise<void> {
     case 'cleanup': {
       const { runCleanupCommand } = await import('./commands/runtime.js');
       runCleanupCommand(args.slice(1));
+      break;
+    }
+
+    case 'compact': {
+      const { runCompactCommand } = await import('./commands/runtime.js');
+      runCompactCommand(args.slice(1));
       break;
     }
 

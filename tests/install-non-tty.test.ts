@@ -143,8 +143,8 @@ describe('Install Non-TTY Support', () => {
   });
 
   describe('post-install Next Steps copy', () => {
-    it('frames the choice as two paths', () => {
-      expect(installSource).toContain('Two paths from here:');
+    it('frames the next step as getting started', () => {
+      expect(installSource).toContain('From here:');
     });
 
     it('sets timing honesty about second-session memory injection', () => {
@@ -156,8 +156,8 @@ describe('Install Non-TTY Support', () => {
       expect(installSource).toContain("pc.cyan('~/.light-mem')");
     });
 
-    it('keeps /learn-codebase as the optional front-load path', () => {
-      expect(installSource).toContain('/learn-codebase');
+    it('tells the user memory builds passively from the first prompt', () => {
+      expect(installSource).toContain('Memory builds passively from your first prompt.');
     });
 
     it('demotes the uninstall caveat into a dim footer', () => {

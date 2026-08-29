@@ -16,6 +16,8 @@ import { validateBody } from '../middleware/validateBody.js';
 import { normalizePlatformSource } from '../../../../shared/platform-source.js';
 import { getObservationsByFilePath } from '../../../sqlite/observations/get.js';
 import { getFirstObservationCreatedAt } from '../../../sqlite/observations/recent.js';
+import { recordObservationFeedback } from '../../../sqlite/feedback.js';
+import { DB_PATH } from '../../../../shared/paths.js';
 import { getUptimeSeconds } from '../../../../shared/uptime.js';
 
 const integerArrayLike = z.preprocess((value) => {
@@ -75,6 +77,14 @@ const importSchema = z.object({
   prompts: z.array(z.unknown()).optional(),
 }).passthrough();
 
+const manageCompactSchema = z.object({
+  dryRun: z.boolean().default(true),
+  project: z.string().optional(),
+  ageDays: z.number().optional(),
+  nearDupThreshold: z.number().optional(),
+  lowSignalMinAgeDays: z.number().optional(),
+}).passthrough();
+
 export class DataRoutes extends BaseRouteHandler {
   constructor(
     private paginationHelper: PaginationHelper,
@@ -106,6 +116,8 @@ export class DataRoutes extends BaseRouteHandler {
     app.post('/api/processing', validateBody(setProcessingSchema), this.handleSetProcessing.bind(this));
 
     app.post('/api/import', validateBody(importSchema), this.handleImport.bind(this));
+
+    app.post('/api/manage/compact', validateBody(manageCompactSchema), this.handleManageCompact.bind(this));
   }
 
   private handleGetObservations = this.wrapHandler((req: Request, res: Response): void => {
@@ -176,6 +188,11 @@ export class DataRoutes extends BaseRouteHandler {
     const store = this.dbManager.getSessionStore();
     const observations = store.getObservationsByIds(ids, { orderBy, limit, project });
 
+    // An explicit fetch of specific ids the agent chose is the strongest
+    // retrieval signal — record it so compaction's low-signal pruning can tell
+    // "never retrieved" observations from useful ones. Best-effort; never throws.
+    recordObservationFeedback(store.db, observations.map((o: any) => o.id), 'retrieval');
+
     res.json(observations);
   });
 
@@ -228,7 +245,26 @@ export class DataRoutes extends BaseRouteHandler {
     const totalObservations = db.prepare('SELECT COUNT(*) as count FROM observations').get() as { count: number };
     const totalSessions = db.prepare('SELECT COUNT(*) as count FROM sdk_sessions').get() as { count: number };
     const totalSummaries = db.prepare('SELECT COUNT(*) as count FROM session_summaries').get() as { count: number };
+    const totalVectors = db.prepare('SELECT COUNT(*) as count FROM vectors').get() as { count: number };
     const firstObservationAt = getFirstObservationCreatedAt(db);
+
+    // Cheap compaction preview (aggregate-only; the O(n^2) near-dup cluster count
+    // is deliberately NOT computed here — /api/stats is polled by the viewer UI).
+    const cutoffAge = Date.now() - 180 * 86_400_000;
+    const cutoffLowSignal = Date.now() - 30 * 86_400_000;
+    const ageEligible = (db.prepare(
+      `SELECT COUNT(*) as count FROM (
+         SELECT memory_session_id FROM observations
+         WHERE created_at_epoch < ? AND merged_into_project IS NULL
+         GROUP BY memory_session_id HAVING COUNT(*) >= 2)`
+    ).get(cutoffAge) as { count: number }).count;
+    const lowSignalEligible = (db.prepare(
+      `SELECT COUNT(*) as count FROM (
+         SELECT o.id FROM observations o
+         LEFT JOIN observation_feedback f ON f.observation_id = o.id
+         WHERE o.created_at_epoch < ? AND o.merged_into_project IS NULL
+         GROUP BY o.id HAVING COUNT(f.id) = 0)`
+    ).get(cutoffLowSignal) as { count: number }).count;
 
     const dbPath = paths.database();
     let dbSize = 0;
@@ -254,9 +290,30 @@ export class DataRoutes extends BaseRouteHandler {
         observations: totalObservations.count,
         sessions: totalSessions.count,
         summaries: totalSummaries.count,
+        vectors: totalVectors.count,
         firstObservationAt
+      },
+      compaction: {
+        ageEligibleSessions: ageEligible,
+        lowSignalEligible,
+        nearDuplicateNote: 'near-duplicate cluster count requires an O(n^2) scan — run manage(action=compact, dry_run=true) for an exact preview',
       }
     });
+  });
+
+  private handleManageCompact = this.wrapHandler(async (req: Request, res: Response): Promise<void> => {
+    const { dryRun, project, ageDays, nearDupThreshold, lowSignalMinAgeDays } =
+      req.body as z.infer<typeof manageCompactSchema>;
+    const { runCompactionOnOpenDb } = await import('../../../infrastructure/ObservationCompaction.js');
+    // Reuse the worker's already-open connection + initialized LocalVectorStore
+    // rather than opening a second Database on the same file (WAL write-lock
+    // contention). Pass DB_PATH so the backup step can VACUUM INTO from a fresh
+    // read-only handle without touching the live connection.
+    const result = await runCompactionOnOpenDb(this.dbManager.getConnection(), {
+      dryRun, project, ageDays, nearDupThreshold, lowSignalMinAgeDays,
+      backupSourcePath: DB_PATH,
+    });
+    res.json(result);
   });
 
   private handleGetProjects = this.wrapHandler((req: Request, res: Response): void => {

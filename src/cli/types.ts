@@ -6,6 +6,11 @@ export interface NormalizedHookInput {
   toolName?: string;
   toolInput?: unknown;
   toolResponse?: unknown;
+  // PostToolBatch (Claude Code) delivers a whole batch of resolved tool calls in
+  // one event instead of one PostToolUse per tool. Each entry mirrors the
+  // single-tool fields; toolResponse here is the serialized tool_result content
+  // the model saw (a string/content-block), not PostToolUse's structured Output.
+  toolCalls?: Array<{ toolName?: string; toolInput?: unknown; toolResponse?: unknown; toolUseId?: string }>;
   transcriptPath?: string;
   lastAssistantMessage?: string;
   turnId?: string;

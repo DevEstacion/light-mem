@@ -1058,6 +1058,24 @@ async function main() {
       process.exit(0);
     }
 
+    case 'compact': {
+      // Safe by default: a bare `compact` PREVIEWS (dry-run). A live destructive
+      // run requires explicit --apply. This matches the HTTP route's dryRun=true
+      // default so the two entrypoints can't surprise an operator differently.
+      const dryRun = !process.argv.includes('--apply');
+      const { runCompaction } = await import('./infrastructure/ObservationCompaction.js');
+      const result = await runCompaction(DB_PATH, { dryRun });
+      const tag = dryRun ? '(dry-run preview — pass --apply to delete)' : '(applied)';
+      console.log(`\nObservation compaction ${tag}`);
+      console.log(`  Groups found:          ${result.groups.length}`);
+      console.log(`  Observations deleted:  ${result.observationsDeleted}`);
+      console.log(`  Observations created:  ${result.observationsCreated}`);
+      console.log(`  Vector rows deleted:   ${result.vectorRowsDeleted}`);
+      console.log(`  Vector rows created:   ${result.vectorRowsCreated}`);
+      if (result.backupPath) console.log(`  Backup:                ${result.backupPath}`);
+      process.exit(0);
+    }
+
     case '--daemon':
     default: {
       // Duplicate gate, ground truth FIRST (Phase 5): a live worker owns the

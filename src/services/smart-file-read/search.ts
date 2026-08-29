@@ -297,7 +297,7 @@ export function formatSearchResults(result: SearchResult, query: string): string
   }
 
   parts.push("── Actions ──");
-  parts.push('  To see full implementation: use smart_unfold with file path and symbol name');
+  parts.push('  To see full implementation: use code(mode="unfold", file_path=..., symbol_name=...)');
 
   return parts.join("\n");
 }

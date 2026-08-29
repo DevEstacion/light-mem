@@ -403,7 +403,7 @@ describe('ResultFormatter', () => {
 
       expect(tips).toContain('Search Strategy');
       expect(tips).toContain('timeline');
-      expect(tips).toContain('get_observations');
+      expect(tips).toContain('search(mode="fetch"');
     });
 
     it('should include filter examples', () => {

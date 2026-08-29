@@ -46,8 +46,9 @@ uses the built-in `node:sqlite` module (unflagged in Node 24).
   RRF search; embeddings stored as BLOBs (256 float32 = 1024 bytes).
 - **SQLite layer** — `src/services/sqlite/`. `node-sqlite-compat.ts` wraps the built-in
   `node:sqlite` `DatabaseSync` with a bun:sqlite-compatible surface.
-- **MCP search server** — `plugin/scripts/mcp-server.cjs`. Exposes `search`, `timeline`,
-  `get_observations`, and smart code-search tools to Claude.
+- **MCP search server** — `plugin/scripts/mcp-server.cjs`. Exposes a mode-dispatched tool
+  surface to Claude: `search` (mode: index/timeline/fetch), `code` (mode: search/outline/unfold),
+  `corpus` (action-dispatched knowledge corpora), and `manage` (action: stats/compact).
 - **npx CLI / installer** — `src/npx-cli/`. `install`, `repair`, `doctor`, runtime commands.
 - **Build** — `scripts/build-hooks.js` (esbuild bundle + Rule A canonical-template verify)
   and `scripts/sync-plugin-manifests.js` (version propagation).

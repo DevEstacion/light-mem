@@ -89,9 +89,30 @@ function shellTemplateManifest(buildShellCommand) {
           background: true,
         }),
         'UserPromptSubmit.0.0': claudeHook(['hook', 'claude-code', 'session-init']),
-        'PostToolUse.0.0': claudeHook(['hook', 'claude-code', 'observation']),
+        // PostToolBatch fires once per resolved batch of tool calls (Claude
+        // Code), not once per tool — cutting per-tool worker spawns to one per
+        // model turn. Grok shares this hooks.json but has no PostToolBatch event
+        // and SILENTLY SKIPS the unknown key (verified: xai-org/grok-build
+        // crates/codegen/xai-grok-hooks/src/config.rs — "Unknown event names are
+        // skipped, not errors"), so Grok's own per-tool observation hook is
+        // installed separately into ~/.grok/hooks/light-mem.json (GrokInstaller,
+        // generated as plugin/hooks/grok-hooks.json). Codex likewise keeps
+        // PostToolUse in codex-hooks.json.
+        'PostToolBatch.0.0': claudeHook(['hook', 'claude-code', 'observation-batch']),
         'PreToolUse.0.0': claudeHook(['hook', 'claude-code', 'file-context']),
         'Stop.0.0': claudeHook(['hook', 'claude-code', 'summarize']),
+      },
+      // Matcher is now part of the canonical contract (previously hand-authored
+      // and unverified). Keyed by "Event.groupIdx". PreToolUse is scoped to the
+      // file-touching tools so light-mem no longer spawns a worker subprocess on
+      // EVERY tool call, while still injecting pre-op file-context for reads AND
+      // edits: Claude Code Read/Edit/Write, Grok read_file — file-context.ts is
+      // tool-agnostic and extracts file_path from all of them (the shared
+      // hooks.json serves both hosts). Pipe-separated exact-match matchers are
+      // supported on all Claude Code versions.
+      matchers: {
+        'SessionStart.0': 'startup|clear|compact',
+        'PreToolUse.0': 'Read|read_file|Edit|Write',
       },
     },
     'plugin/.mcp.json': {
@@ -110,6 +131,11 @@ function shellTemplateManifest(buildShellCommand) {
 function hookCommandByPath(parsed, dottedPath) {
   const [event, groupIdx, hookIdx] = dottedPath.split('.');
   return parsed.hooks?.[event]?.[Number(groupIdx)]?.hooks?.[Number(hookIdx)]?.command ?? null;
+}
+
+function hookMatcherByPath(parsed, dottedPath) {
+  const [event, groupIdx] = dottedPath.split('.');
+  return parsed.hooks?.[event]?.[Number(groupIdx)]?.matcher ?? null;
 }
 
 async function verifyShellTemplateCanonical() {
@@ -152,6 +178,17 @@ async function verifyShellTemplateCanonical() {
           );
         }
       }
+      // Matchers are part of the canonical contract too — assert them so a
+      // hand-edit (e.g. dropping the PreToolUse read-tool scoping) is caught.
+      for (const [dottedPath, expected] of Object.entries(spec.matchers ?? {})) {
+        const actual = hookMatcherByPath(parsed, dottedPath);
+        if (actual !== expected) {
+          throw new Error(
+            `Hook matcher drift detected in ${filePath} (${dottedPath}): expected ${JSON.stringify(expected)}, found ${JSON.stringify(actual)}. ` +
+            `Update the matcher in the file and the shellTemplateManifest matchers map together.`
+          );
+        }
+      }
     }
   }
 
@@ -182,6 +219,13 @@ async function verifyShellTemplateCanonical() {
   // template. Codex discovers ~/.codex/hooks.json (learn.chatgpt.com/docs/hooks)
   // and light-mem installs this template there via CodexInstaller.
   writeCodexHooksJson(buildShellCommand);
+
+  // Grok Build reads the shared plugin hooks.json, but that file now carries
+  // PostToolBatch (which Grok has no event for and silently skips). To keep
+  // Grok's per-tool memory capture, GrokInstaller installs this standalone
+  // PostToolUse observation hook into ~/.grok/hooks/light-mem.json (Grok reads
+  // ~/.grok/hooks/*.json — xai-org/grok-build discovery.rs).
+  writeGrokHooksJson(buildShellCommand);
 }
 
 /**
@@ -275,6 +319,54 @@ function writeCodexHooksJson(buildShellCommand) {
   };
 
   const outPath = 'plugin/hooks/codex-hooks.json';
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  fs.writeFileSync(outPath, `${JSON.stringify(document, null, 2)}\n`);
+  console.log(`✓ Wrote ${outPath}`);
+}
+
+/**
+ * Emit plugin/hooks/grok-hooks.json — the single PostToolUse observation hook
+ * that GrokInstaller writes to ~/.grok/hooks/light-mem.json. Grok gets every
+ * other lifecycle hook from the shared plugin hooks.json (which it reads
+ * directly); only PostToolUse is missing there now that claude-code uses
+ * PostToolBatch (an event Grok skips). The command is byte-identical to the
+ * old shared PostToolUse (host claude-code); Grok tags the observation via
+ * GROK_HOOK_EVENT/GROK_SESSION_ID env (see src/shared/platform-source.ts), so
+ * no extra env is needed.
+ */
+function writeGrokHooksJson(buildShellCommand) {
+  console.log('\n📋 Generating plugin/hooks/grok-hooks.json…');
+
+  const grokObservation = buildShellCommand({
+    host: 'claude-code',
+    requireFile: 'node-runner.js',
+    requireFileSecondary: 'worker-service.cjs',
+    trailingCommand: [
+      'node', '"$_P/scripts/node-runner.js"', '"$_P/scripts/worker-service.cjs"',
+      'hook', 'claude-code', 'observation',
+    ],
+    notFoundMessage: 'light-mem: plugin scripts not found',
+  });
+
+  const document = {
+    description: 'light-mem memory system hooks (Grok Build)',
+    hooks: {
+      PostToolUse: [
+        {
+          hooks: [
+            {
+              type: 'command',
+              command: grokObservation,
+              timeout: 120,
+              statusMessage: '🧠 light-mem…',
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  const outPath = 'plugin/hooks/grok-hooks.json';
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, `${JSON.stringify(document, null, 2)}\n`);
   console.log(`✓ Wrote ${outPath}`);
@@ -688,12 +780,12 @@ async function buildHooks() {
 
     console.log('\n📋 Verifying distribution files...');
     const requiredDistributionFiles = [
-      'plugin/skills/mem-search/SKILL.md',
-      'plugin/skills/smart-explore/SKILL.md',
+      'plugin/skills/smart-search/SKILL.md',
       'plugin/skills/how-it-works/SKILL.md',
       'plugin/skills/how-it-works/onboarding-explainer.md',
       'plugin/hooks/hooks.json',
       'plugin/hooks/codex-hooks.json',
+      'plugin/hooks/grok-hooks.json',
       'plugin/scripts/node-runner.js',
       'plugin/.claude-plugin/plugin.json',
       'plugin/.mcp.json',

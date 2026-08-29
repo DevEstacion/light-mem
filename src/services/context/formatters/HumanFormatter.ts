@@ -54,8 +54,8 @@ export function renderHumanContextIndex(): string[] {
     `${colors.dim}Context Index: This semantic index (titles, types, files, tokens) is usually sufficient to understand past work.${colors.reset}`,
     '',
     `${colors.dim}When you need implementation details, rationale, or debugging context:${colors.reset}`,
-    `${colors.dim}  - Fetch by ID: get_observations([IDs]) for observations visible in this index${colors.reset}`,
-    `${colors.dim}  - Search history: Use the mem-search skill for past decisions, bugs, and deeper research${colors.reset}`,
+    `${colors.dim}  - Fetch by ID: search(mode="fetch", ids=[IDs]) for observations visible in this index${colors.reset}`,
+    `${colors.dim}  - Search history: Use the smart-search skill for past decisions, bugs, and deeper research${colors.reset}`,
     `${colors.dim}  - Trust this index over re-reading code for past decisions and learnings${colors.reset}`,
     ''
   ];

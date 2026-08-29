@@ -1,0 +1,17 @@
+{
+  "description": "light-mem memory system hooks (Grok Build)",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const f=require('fs'),p=require('path'),o=require('os'),c=require('child_process');const h=o.homedir();const C=process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude');const E=process.env.CLAUDE_PLUGIN_ROOT||process.env.GROK_PLUGIN_ROOT||process.env.PLUGIN_ROOT||'';const L=x=>{try{return f.readdirSync(x).filter(n=>/^\\\\d/.test(n)).map(n=>p.join(x,n)).filter(z=>{try{return f.statSync(z).isDirectory()}catch{return false}}).sort((a,b)=>f.statSync(b).mtimeMs-f.statSync(a).mtimeMs)}catch{return[]}};const K=[E,...L(p.join(C,'plugins','cache','light-mem','light-mem')),p.join(C,'plugins','marketplaces','light-mem','plugin')].filter(Boolean);const need=[\\\"node-runner.js\\\",\\\"worker-service.cjs\\\"];let R=null;for(const k of K){const r=f.existsSync(p.join(k,'plugin','scripts'))?p.join(k,'plugin'):k;if(need.every(s=>f.existsSync(p.join(r,'scripts',s)))){R=r;break}}if(!R){process.stderr.write(\\\"light-mem: plugin scripts not found\\\\n\\\");process.exit(1)}const argv=[\\\"node-runner.js\\\",\\\"worker-service.cjs\\\"].map(s=>p.join(R,'scripts',s)).concat([\\\"hook\\\",\\\"claude-code\\\",\\\"observation\\\"]);const env=Object.assign({},process.env,{});const r=c.spawnSync(process.execPath,argv,{stdio:'inherit',env:env});const j=null;if(j)process.stdout.write(j+'\\\\n');process.exit(r.status==null?1:r.status);\"",
+            "timeout": 120,
+            "statusMessage": "🧠 light-mem…"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -99,6 +99,12 @@ export class LocalVectorStore {
     return LocalVectorStore.instance;
   }
 
+  /** Whether the singleton has been initialized (used by the standalone CLI
+   *  compaction path so it doesn't clobber a live worker's instance). */
+  static hasInstance(): boolean {
+    return LocalVectorStore.instance !== null;
+  }
+
   /** No-op: collections are virtual (the `collection` column). Kept for API parity. */
   createCollection(_collectionName: string): void {
     /* virtual — nothing to create */
