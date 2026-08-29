@@ -743,8 +743,16 @@ export class MigrationRunner {
   }
 
   private createObservationFeedbackTable(): void {
-    const applied = this.db.query('SELECT 1 FROM schema_versions WHERE version = 24').get();
-    if (applied) return;
+    // Heal on actual table presence, NOT the version stamp. An earlier build
+    // recorded schema_versions=24 without creating this table (version-number
+    // reuse), leaving existing DBs permanently without observation_feedback —
+    // which silently breaks feedback recording, low-signal compaction, and
+    // /api/stats. Checking the table directly (create is idempotent) repairs
+    // those databases on the next start.
+    const tableExists = this.db
+      .query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'observation_feedback'")
+      .get();
+    if (tableExists) return;
 
     this.db.run(`
       CREATE TABLE IF NOT EXISTS observation_feedback (
