@@ -994,7 +994,7 @@ ${e}`,o=cI(i,s),a=`${t}.tmp`;try{(0,as.writeFileSync)(a,o),(0,as.renameSync)(a,t
       ${e.project?"AND project = ?":""}
       AND (doc_id LIKE 'obs\\_%\\_narrative' ESCAPE '\\' OR doc_id LIKE 'obs\\_%\\_text' ESCAPE '\\')
     ORDER BY sqlite_id
-  `).all(...e.project?[Pm,e.project]:[Pm]),n=new Map;for(let d of r)(!n.get(d.sqlite_id)||d.doc_id.endsWith("_narrative"))&&n.set(d.sqlite_id,d);let i=[...n.values()];i.length>e.maxCandidateRows&&(y.warn("SYSTEM","compact: near-dup scan truncated to maxCandidateRows",{total:i.length,cap:e.maxCandidateRows}),i=i.slice(-e.maxCandidateRows));let s=i.map(d=>fPe(d.embedding)),o=i.length,a=Array.from({length:o},(d,p)=>p),c=d=>a[d]===d?d:a[d]=c(a[d]),l=(d,p)=>{let f=c(d),m=c(p);f!==m&&(a[f]=m)};for(let d=0;d<o;d++)for(let p=d+1;p<o;p++){if(i[d].project!==i[p].project)continue;let f=0,m=Math.min(s[d].length,s[p].length);for(let h=0;h<m;h++)f+=s[d][h]*s[p][h];f>=e.nearDupThreshold&&l(d,p)}let u=new Map;for(let d=0;d<o;d++){let p=c(d),f=u.get(p)??[];f.push(i[d].sqlite_id),u.set(p,f)}return[...u.values()].filter(d=>d.length>=2)}function gPe(t,e){let r=Date.now()-e.lowSignalMinAgeDays*864e5;return t.prepare(`
+  `).all(...e.project?[Pm,e.project]:[Pm]),n=new Map;for(let d of r)(!n.get(d.sqlite_id)||d.doc_id.endsWith("_narrative"))&&n.set(d.sqlite_id,d);let i=[...n.values()];i.length>e.maxCandidateRows&&(y.warn("SYSTEM","compact: near-dup scan truncated to maxCandidateRows",{total:i.length,cap:e.maxCandidateRows}),i=i.slice(-e.maxCandidateRows));let s=i.map(d=>fPe(d.embedding)),o=i.length,a=Array.from({length:o},(d,p)=>p),c=d=>a[d]===d?d:a[d]=c(a[d]),l=(d,p)=>{let f=c(d),m=c(p);f!==m&&(a[f]=m)};for(let d=0;d<o;d++)for(let p=d+1;p<o;p++){if(i[d].project!==i[p].project)continue;let f=0,m=Math.min(s[d].length,s[p].length);for(let h=0;h<m;h++)f+=s[d][h]*s[p][h];f>=e.nearDupThreshold&&l(d,p)}let u=new Map;for(let d=0;d<o;d++){let p=c(d),f=u.get(p)??[];f.push(i[d].sqlite_id),u.set(p,f)}return[...u.values()].filter(d=>d.length>=2)}function gPe(t,e){let r;try{r=t.prepare("SELECT COUNT(*) AS c FROM observation_feedback").get().c}catch{return y.warn("SYSTEM","compact: skipping low-signal pruning \u2014 observation_feedback table not present",{}),[]}if(r===0)return y.warn("SYSTEM","compact: skipping low-signal pruning \u2014 no retrieval/injection signal recorded yet",{}),[];let n=Date.now()-e.lowSignalMinAgeDays*864e5;return t.prepare(`
     SELECT o.id FROM observations o
     LEFT JOIN observation_feedback f ON f.observation_id = o.id
     WHERE o.created_at_epoch < ?
@@ -1003,7 +1003,7 @@ ${e}`,o=cI(i,s),a=`${t}.tmp`;try{(0,as.writeFileSync)(a,o),(0,as.renameSync)(a,t
     GROUP BY o.id
     HAVING COUNT(f.id) = 0
     ORDER BY o.created_at_epoch ASC
-  `).all(...e.project?[r,e.project]:[r]).map(i=>i.id)}function yPe(t){let e=t.map((r,n)=>{let i="";try{i=r.facts?JSON.parse(r.facts).join("; "):""}catch{i=""}return`### Source observation ${n+1} (id=${r.id}, type=${r.type})
+  `).all(...e.project?[n,e.project]:[n]).map(s=>s.id)}function yPe(t){let e=t.map((r,n)=>{let i="";try{i=r.facts?JSON.parse(r.facts).join("; "):""}catch{i=""}return`### Source observation ${n+1} (id=${r.id}, type=${r.type})
 Title: ${r.title??""}
 Narrative: ${r.narrative??""}
 Facts: ${i}`}).join(`

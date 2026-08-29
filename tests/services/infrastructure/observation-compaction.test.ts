@@ -81,6 +81,10 @@ describe('ObservationCompaction — vector integrity', () => {
     seedObservation(db, 1, 'Refactored the authentication middleware in login flow', ['login.ts:42'], oldEpoch);
     seedObservation(db, 2, 'Documented the deployment pipeline for the billing service', ['deploy.md:10'], oldEpoch);
 
+    // Activate the feedback subsystem with an unrelated signal — low-signal
+    // pruning is skipped entirely when observation_feedback is empty.
+    db.prepare('INSERT INTO observation_feedback (observation_id, signal_type, created_at_epoch) VALUES (?, ?, ?)').run(999, 'retrieval', Date.now());
+
     const before = db.prepare(`SELECT COUNT(*) AS n FROM vectors`).get() as { n: number };
     expect(before.n).toBe(4); // 2 narrative + 2 fact rows
 
@@ -104,6 +108,7 @@ describe('ObservationCompaction — vector integrity', () => {
     const db = makeDb();
     const oldEpoch = Date.now() - 40 * 86_400_000;
     seedObservation(db, 10, 'Some old observation nobody ever retrieved', [], oldEpoch);
+    db.prepare('INSERT INTO observation_feedback (observation_id, signal_type, created_at_epoch) VALUES (?, ?, ?)').run(999, 'retrieval', Date.now());
 
     const result = await runCompactionOnOpenDb(db, { dryRun: true, nearDupThreshold: 0.999 });
 
@@ -126,6 +131,21 @@ describe('ObservationCompaction — vector integrity', () => {
 
     expect(result.observationsDeleted).toBe(0);
     const still = db.prepare('SELECT COUNT(*) AS n FROM observations WHERE id = 20').get() as { n: number };
+    expect(still.n).toBe(1);
+  });
+
+  it('skips low-signal pruning entirely when no feedback has been recorded yet', async () => {
+    const db = makeDb();
+    const oldEpoch = Date.now() - 40 * 86_400_000;
+    seedObservation(db, 30, 'Old observation, but the feedback subsystem has zero rows', [], oldEpoch);
+
+    // observation_feedback is empty → "never retrieved" is indistinguishable
+    // from "not yet retrieved" → the run must delete nothing.
+    const result = await runCompactionOnOpenDb(db, { dryRun: false, nearDupThreshold: 0.999 });
+
+    expect(result.observationsDeleted).toBe(0);
+    expect(result.groups.some(g => g.kind === 'low_signal')).toBe(false);
+    const still = db.prepare('SELECT COUNT(*) AS n FROM observations WHERE id = 30').get() as { n: number };
     expect(still.n).toBe(1);
   });
 });

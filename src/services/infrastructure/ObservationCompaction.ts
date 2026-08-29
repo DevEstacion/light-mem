@@ -188,6 +188,24 @@ function selectNearDupClusters(db: Database, opts: CompactionOptions): number[][
  * observations aren't flagged before anyone had a chance to retrieve them.
  */
 function selectLowSignalCandidates(db: Database, opts: CompactionOptions): number[] {
+  // Without any retrieval/injection signal recorded, "never retrieved" is
+  // indistinguishable from "not yet retrieved" — every old observation would
+  // look low-signal and get deleted on the first run. Skip low-signal pruning
+  // entirely until feedback has actually been accruing. Also tolerates the
+  // observation_feedback table not existing on databases migrated before it
+  // was introduced.
+  let feedbackRows: number;
+  try {
+    feedbackRows = (db.prepare('SELECT COUNT(*) AS c FROM observation_feedback').get() as { c: number }).c;
+  } catch {
+    logger.warn('SYSTEM', 'compact: skipping low-signal pruning — observation_feedback table not present', {});
+    return [];
+  }
+  if (feedbackRows === 0) {
+    logger.warn('SYSTEM', 'compact: skipping low-signal pruning — no retrieval/injection signal recorded yet', {});
+    return [];
+  }
+
   const cutoff = Date.now() - opts.lowSignalMinAgeDays * 86_400_000;
   const rows = db.prepare(`
     SELECT o.id FROM observations o
